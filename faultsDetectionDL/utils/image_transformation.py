@@ -67,7 +67,7 @@ class recurse_transform():
     def __init__(self, image_couple, max_trans=20):
         self.image_couple = image_couple
         self.max_trans = max_trans
-        self.all_transformed = []
+        self.all_transformed = [image_couple]
         self.trans_indices=[]
         
     def run_recurse(self, couple_image_gt, c_Ts, names_idx):
