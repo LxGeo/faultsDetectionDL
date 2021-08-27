@@ -15,8 +15,8 @@ from shapely.geometry import box
 import tempfile
 import affine
 
-from grid_creation import run_grid_creation
-from tile_partition import run_partition
+from faultsDetectionDL.utils.grid_creation import run_grid_creation
+from faultsDetectionDL.utils.tile_partition import run_partition
 
 import sys,os
 
@@ -36,8 +36,8 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
         print( "Running partition for angle {} ".format(angle) )
 
         # Rotate RGB and gtreshape_as_image
-        rgb_rotated = rotate_image(reshape_as_image(rgb_rio_dst.read()), angle, resize=True)
-        gt_rotated = rotate_image(reshape_as_image(gt_rio_dst.read()), angle, resize=True)
+        rgb_rotated = rotate_image(reshape_as_image(rgb_rio_dst.read()), angle, resize=True, preserve_range=True)
+        gt_rotated = rotate_image(reshape_as_image(gt_rio_dst.read()), angle, resize=True, preserve_range=True)
         
         assert((rgb_rotated.shape[0] == gt_rotated.shape[0]) and (rgb_rotated.shape[1] == gt_rotated.shape[1]))
         
@@ -54,7 +54,7 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
             x_size, y_size)
         #new_geotransform= new_geotransform* affine.Affine.rotation(-angle, pivot=rgb_zone_geometry.centroid.coords[0])
         
-        with tempfile.NamedTemporaryFile() as rgb_rotated_tmpfile:
+        with tempfile.NamedTemporaryFile(delete=False) as rgb_rotated_tmpfile:
             with rio.open(rgb_rotated_tmpfile.name,
                                'w+', driver='GTiff',
                                height=rgb_rotated.shape[0],
@@ -64,7 +64,7 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
                                crs=rgb_rio_dst.crs,
                                transform=new_geotransform) as rgb_rotated_dst:
                 
-                with tempfile.NamedTemporaryFile() as gt_rotated_tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False) as gt_rotated_tmpfile:
                     with rio.open(gt_rotated_tmpfile.name,
                                        'w+', driver='GTiff',
                                        height=gt_rotated.shape[0],

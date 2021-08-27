@@ -9,7 +9,7 @@ import sys, os
 
 import rasterio as rio
 from rasterio import mask
-from image_transformation import images_transformations_list
+from faultsDetectionDL.utils.image_transformation import images_transformations_list
 from rasterio.plot import reshape_as_raster, reshape_as_image
 import geopandas as gpd
 from tqdm import tqdm
