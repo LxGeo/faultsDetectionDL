@@ -10,11 +10,15 @@ from keras.models import load_model
 
 class ModelLoader():
     
-    def __init__(self, custom_objects):
+    def __init__(self, custom_objects, preprocesser=None):
         self.custom_objects = custom_objects
+        self.preprocesser=preprocesser
     
     def get_model(self, model_path):
         """
         Loads model using custom objects
         """
         return load_model(model_path, self.custom_objects)
+    
+    def get_preprocesser(self):
+        return self.preprocesser
