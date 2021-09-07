@@ -16,7 +16,7 @@ from faultsDetectionDL.training.pt import TRAIN_PATH,VALID_PATH, IMG_CHANNELS, B
 
 from faultsDetectionDL.utils.image_transformation import images_transformations_list, Trans_Identity
 from torch.utils.data import TensorDataset, DataLoader
-from faultsDetectionDL.data.faults_dataset import FaultsDataset 
+from faultsDetectionDL.data.pt.faults_dataset import FaultsDataset 
 
 from matplotlib import pyplot as plt
 
