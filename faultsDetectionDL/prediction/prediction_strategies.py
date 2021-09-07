@@ -33,7 +33,7 @@ from rasterio import mask
 
 class PatchOverlapStrategy():
     
-    def __init__(self, ready_model, rio_dataset, patch_size, num_bands=3, overlap_ratio=0.5, preprocesser=None):
+    def __init__(self, ready_model, rio_dataset, patch_size, n_classes , num_bands=3, overlap_ratio=0.5):
         self.model = ready_model
         self.rio_dataset = rio_dataset
         self.patch_size = patch_size
@@ -41,10 +41,9 @@ class PatchOverlapStrategy():
         self.overlap_ratio=overlap_ratio
         self.pred_size = round(patch_size * overlap_ratio)
         self.pad_count = (self.patch_size-self.pred_size)//2
-        self.preprocesser = preprocesser
         
         out_profile = rio_dataset.profile.copy()
-        out_profile.update(count=1, dtype=rio.uint8)
+        out_profile.update(count=1, dtype= rio.uint8 if n_classes>1 else rio.float32)
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as out_tempfile:
             self.out_rio_dst = rio.open(out_tempfile.name, mode='w+', **out_profile)
@@ -86,7 +85,7 @@ class PatchOverlapStrategy():
         big_patches_array=np.array(big_patches_array)
         return big_patches_array,small_windows
     
-    def predict(self):
+    def fill_out_dataset(self):
         """
         Windowed prediction
         """        
@@ -95,13 +94,9 @@ class PatchOverlapStrategy():
         
         ### predict on all patches
         # !! if any error below try rio interoperability
-        if self.preprocesser:
-            big_patches_array = self.preprocesser(big_patches_array)
         
-        big_patches_preds = self.model.predict(big_patches_array,batch_size=32)
-        small_patches_preds = big_patches_preds[:, self.pad_count:-self.pad_count,self.pad_count:-self.pad_count,: ]      
-        small_patches_preds = np.argmax(small_patches_preds, axis=-1)
-        small_patches_preds = np.expand_dims(small_patches_preds, axis=-1)
+        big_patches_preds = self.model.predict(big_patches_array)
+        small_patches_preds = big_patches_preds[:, self.pad_count:-self.pad_count,self.pad_count:-self.pad_count,: ]
         
         for patch_index ,c_patch_window in enumerate(small_windows):
             self.out_rio_dst.write(reshape_as_raster(small_patches_preds[patch_index].astype(self.out_rio_dst.meta["dtype"])), window = c_patch_window)

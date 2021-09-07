@@ -16,11 +16,13 @@ from rasterio.plot import reshape_as_raster, reshape_as_image
 from shapely.affinity import rotate as rotate_geometry
 from skimage.transform import rotate as rotate_image
 from shapely.geometry import box
-from faultsDetectionDL.prediction.model_loader import ModelLoader
+
 from faultsDetectionDL.prediction.prediction_strategies import PatchOverlapStrategy
 import tempfile
 import affine
-import segmentation_models as sm
+from faultsDetectionDL.prediction.model_loader import GenericModel,get_model_wrapper
+
+framework_options = GenericModel._available_frameworks
 
 
 def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
@@ -30,7 +32,7 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     #refrence_central_pixel_position = reference_dst.height//2, reference_dst.width//2
     
     inv_rotated_array = rotate_image(reshape_as_image(to_rotate_back_dst.read()), -angle, resize=True, preserve_range=True, order=1)
-    inv_rotated_array = np.round(inv_rotated_array)
+    #inv_rotated_array = np.round(inv_rotated_array)
     inv_rotated_central_pixel_position=inv_rotated_array.shape[0]//2, inv_rotated_array.shape[1]//2
     
     output_profile = to_rotate_back_dst.profile.copy()
@@ -46,12 +48,11 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     
 
 def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy, custom_objects_config,
-                         patch_size, num_bands, preprocesser):
+                         patch_size, num_bands, num_classes, framework_model_wrapper, backbone):
     """
     Runs prediction for site using a set of 
     """
     
-    ML = ModelLoader(custom_objects_config, preprocesser)
     # define common variables
     x_size = site_rio_dst.transform[0]
     y_size = -site_rio_dst.transform[4]
@@ -90,12 +91,11 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
         c_checkpoint_output_folder = os.path.join(output_folder, checkpoint_name)
         if not (os.path.isdir(c_checkpoint_output_folder)):
             os.makedirs(c_checkpoint_output_folder)
-        c_loaded_model = ML.get_model(c_checkpoint_path)
-        preprocesser = ML.get_preprocesser()
+        c_loaded_model = framework_model_wrapper(c_checkpoint_path, backbone=backbone, n_classes=num_classes)
         for c_angle in ang_raster_map: 
             c_rotated_raster_dst = ang_raster_map[c_angle]
-            pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, num_bands=num_bands, preprocesser=preprocesser)
-            pred_startegy.predict()
+            pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, n_classes=num_classes, num_bands=num_bands)
+            pred_startegy.fill_out_dataset()
             # saving c_angle back rotation image in current checkpoint folder
             c_back_rot_path = os.path.join(c_checkpoint_output_folder, "pred_rot_{}.tif".format(c_angle))
             inv_rotate_raster( pred_startegy.out_rio_dst, ang_raster_map[0], c_angle, c_back_rot_path )
@@ -114,8 +114,10 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
 @click.option('-cp', '--checkpoints_paths', type=click.Path(exists=True), required=True, multiple=True, help="Models checkpoints paths to load.")
 @click.option('-ps', '--patch_size', type=int, required=True, help="Patch size used at training phase")
 @click.option('-nb', '--num_bands', type=int, required=True, help="Number of bands used while training phase")
+@click.option('-nc', '--num_classes', type=int, required=True, help="Number of bands used while training phase")
 @click.option('-bb', '--backbone', type=str, required=False, default=None, help="Backbone used in sm")
-def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, backbone):
+@click.option('-fn', '--framework_name', required=True, default=None,type=click.Choice(framework_options, case_sensitive=False), help="Framework used for predicition")
+def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, framework_name):
     """
     """
     if (0 not in rot_angles):
@@ -141,14 +143,14 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
     if not(os.path.isdir(output_folder)):
         os.makedirs(output_folder)
     
-    preprocesser=None
     if backbone:
         print("Using Backbone: {}".format(backbone))
-        preprocesser = sm.get_preprocessing(backbone) 
+    framework_model_wrapper = get_model_wrapper(framework_name)
         
     custom_config=None
     with rio.open(site_raster_path) as site_rio_dst:
-        run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy, custom_config, patch_size, num_bands, preprocesser)
+        run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy,
+                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, backbone)
 
 
 if __name__ == "__main__":

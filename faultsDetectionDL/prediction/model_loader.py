@@ -6,19 +6,48 @@ Created on Fri Aug 27 20:11:35 2021
 @author: cherif
 """
 
-from keras.models import load_model
+import sys
 
-class ModelLoader():
+class GenericModel():
+    """
+    Abstract class that defines models required methods
+    """
+    _available_frameworks = ("tf", "pt")
+    preprocesser = None
+    loaded_model = None
     
-    def __init__(self, custom_objects, preprocesser=None):
-        self.custom_objects = custom_objects
-        self.preprocesser=preprocesser
-    
-    def get_model(self, model_path):
+    def preprocess_data(self, data):
         """
-        Loads model using custom objects
         """
-        return load_model(model_path, self.custom_objects)
+        return self.preprocesser(data) if self.preprocesser else data
     
-    def get_preprocesser(self):
-        return self.preprocesser
+    def predict(self):
+        raise NotImplementedError()
+    
+
+
+def get_model_wrapper(framework):
+    """
+    Returns respective model wrapper class
+    """
+    
+    if framework.lower() == "tf":
+        try:
+            from faultsDetectionDL.prediction.tf.tf_model_loader import TfModel
+            return TfModel
+        except ImportError as e:
+            print("tensorflow model wrapper could not be imported!\n Check python environment")
+            raise(e)
+    
+    elif framework.lower() == "pt":
+        try:
+            from faultsDetectionDL.prediction.pt.pt_model_loader import PtModel
+            return PtModel
+        except ImportError as e:
+            print("pytorch model wrapper could not be imported!\n Check python environment")
+            raise(e)
+            
+    else:
+        "framework name not found in set: {}".format(GenericModel._available_frameworks)
+        sys.exit(1)
+
