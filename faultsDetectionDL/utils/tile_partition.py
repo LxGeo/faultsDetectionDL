@@ -48,11 +48,11 @@ def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder,
         
         output_path_templ = output_folder+"/{0}/{{}}/{{}}_{{}}.tif".format(tile_type)
         with rio.open(output_path_templ.format('image',site_name, ID),
-                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=4, crs=rgb_crs, transform=geotransform, nodata=-32768, dtype=rio.float32) as output_rgb_dst:
+                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=4, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_rgb_dst:
             output_rgb_dst.write(reshape_as_raster(rgb_matrix).astype(np.float32))
             
         with rio.open(output_path_templ.format('gt',site_name, ID),
-                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=1, crs=rgb_crs, transform=geotransform, nodata=-32768, dtype=rio.float32) as output_gt_dst:
+                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=1, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_gt_dst:
             output_gt_dst.write(reshape_as_raster(gt_matrix).astype(np.float32))
     
     for c_row in tqdm(tiles_gdf.iterrows(), desc="Iterating grids", total=len(tiles_gdf)):
@@ -64,8 +64,8 @@ def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder,
         assert (c_TTV in [0,2])
         
         c_box = c_row[1]["geometry"]
-        rgb_image, rgb_transform = rio.mask.mask(rgb_rio_dst,[c_box], crop=True, nodata=-32768)
-        gt_image, gt_transform = rio.mask.mask(gt_rio_dst,[c_box], crop=True, nodata=-32768)
+        rgb_image, rgb_transform = rio.mask.mask(rgb_rio_dst,[c_box], crop=True, nodata=0)
+        gt_image, gt_transform = rio.mask.mask(gt_rio_dst,[c_box], crop=True, nodata=0)
         
         rgb_image = reshape_as_image(rgb_image)
         gt_image = reshape_as_image(gt_image)

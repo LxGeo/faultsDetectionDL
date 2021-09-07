@@ -6,6 +6,7 @@ Created on Thu Aug 19 18:09:50 2021
 @author: Bilel Kanoun
 """
 
+import numpy as np
 import rasterio as rio
 import geopandas as gpd
 from rasterio.plot import reshape_as_raster, reshape_as_image
@@ -36,8 +37,14 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
         print( "Running partition for angle {} ".format(angle) )
 
         # Rotate RGB and gtreshape_as_image
-        rgb_rotated = rotate_image(reshape_as_image(rgb_rio_dst.read()), angle, resize=True, preserve_range=True)
-        gt_rotated = rotate_image(reshape_as_image(gt_rio_dst.read()), angle, resize=True, preserve_range=True)
+        rgb_rio_raster = rgb_rio_dst.read()
+        gt_rio_raster = gt_rio_dst.read()
+        #accross_bands_no_data = np.invert(rgb_rio_raster.min(axis=0).astype(bool))
+        accross_bands_no_data = (rgb_rio_raster.min(axis=0)==255)
+        rgb_rio_raster[:, accross_bands_no_data] = 0
+        gt_rio_raster[:, accross_bands_no_data] = 0
+        rgb_rotated = rotate_image(reshape_as_image(rgb_rio_raster), angle, resize=True, preserve_range=True)
+        gt_rotated = rotate_image(reshape_as_image(gt_rio_raster), angle, resize=True, preserve_range=True)
         
         assert((rgb_rotated.shape[0] == gt_rotated.shape[0]) and (rgb_rotated.shape[1] == gt_rotated.shape[1]))
         

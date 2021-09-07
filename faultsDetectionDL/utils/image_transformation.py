@@ -6,59 +6,84 @@ Created on Tue Aug 10 18:47:33 2021
 @author: Bilel Kanoun
 """
 from skimage.transform import rotate
+from skimage import exposure
 import numpy as np
 
 class Image_Transformation:
     
     def apply_transformation(image,gt):
         pass
+
+class Trans_Identity(Image_Transformation):
+    def apply_transformation(self, image1, gt1):        
+        return (image1, gt1)
     
 class Trans_Rot90(Image_Transformation):
-    def apply_transformation(image1, gt1):
+    def apply_transformation(self, image1, gt1):
         image1_t = rotate(image1, 90)
         gt1_t = rotate(gt1, 90)
         
         return (image1_t, gt1_t)
 
 class Trans_Rot180(Image_Transformation):
-    def apply_transformation(image1, gt1):
+    def apply_transformation(self, image1, gt1):
         image1_t = rotate(image1, 180)
         gt1_t = rotate(gt1, 180)
         
         return (image1_t, gt1_t)
 
 class Trans_Rot270(Image_Transformation):
-    def apply_transformation(image1, gt1):
+    def apply_transformation(self, image1, gt1):
         image1_t = rotate(image1, 270)
         gt1_t = rotate(gt1, 270)
         
         return (image1_t, gt1_t)
 
 class Trans_Flipud(Image_Transformation):
-    def apply_transformation(image1, gt1):
+    def apply_transformation(self, image1, gt1):
         image1_t = np.flipud(image1)
         gt1_t = np.flipud(gt1)
         
         return (image1_t, gt1_t)
     
 class Trans_fliplr(Image_Transformation):
-    def apply_transformation(image1, gt1):
+    def apply_transformation(self, image1, gt1):
         image1_t = np.fliplr(image1)
         gt1_t = np.fliplr(gt1)
         
         return (image1_t, gt1_t)
 
 class Trans_gaussian_noise(Image_Transformation):
-    def apply_transformation(image1, gt1):
-        noise = np.random.normal(loc = 0.0, scale = 1, size = image1.shape) 
+    def apply_transformation(self, image1, gt1):
+        noise = np.random.normal(loc = 0.0, scale = 2, size = image1.shape) 
         image1_t = np.clip(image1+noise, 0 ,255)
+        return (image1_t, gt1)
+
+class Trans_gamma_adjust(Image_Transformation):    
+    def __init__(self, gamma=1.5):
+        self.gamma = gamma
         
+    def apply_transformation(self, image1, gt1):
+        image1_t = exposure.adjust_gamma(image1/255, self.gamma)*255        
+        return (image1_t, gt1)
+
+class Trans_equal_hist(Image_Transformation):    
+    def apply_transformation(self, image1, gt1):
+        image1_t = exposure.equalize_hist(image1)*255
+        return (image1_t, gt1)
+
+class Trans_contrast_stretch(Image_Transformation):    
+    def apply_transformation(self, image1, gt1):
+        p2, p98 = np.percentile(image1, (2, 98))
+        image1_t = exposure.rescale_intensity(image1, in_range=(p2, p98))*255
         return (image1_t, gt1)
 
 
-images_transformations_list=[Trans_Rot180, Trans_Flipud, Trans_fliplr, Trans_gaussian_noise]
-TDO = { images_transformations_list[i].__name__ : i for i in range(len(images_transformations_list)) }
-to_ignore_trans_lists=[ [0,1,2] ]
+images_transformations_list=[Trans_fliplr(), Trans_Flipud(), Trans_gaussian_noise(), Trans_gamma_adjust(2),
+                             Trans_equal_hist(), Trans_contrast_stretch()]
+                             
+TDO = { images_transformations_list[i].__class__.__name__ : i for i in range(len(images_transformations_list)) }
+to_ignore_trans_lists=[]#[ [0,1,2] ]
 
 class recurse_transform():
     

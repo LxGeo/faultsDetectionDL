@@ -9,7 +9,8 @@ import rasterio
 from rasterio.features import rasterize
 import numpy as np
 import geopandas as gpd
-from scipy.ndimage.filters import gaussian_filter
+#from scipy.ndimage.filters import gaussian_filter
+from scipy.signal import spline_filter
 import sys,os
 
 def rasterize_from_profile(geometry_iter, profile, burn_value):
@@ -25,12 +26,12 @@ def rasterize_from_profile(geometry_iter, profile, burn_value):
                      default_value=burn_value,
                      dtype=profile["dtype"])
 
-def apply_gaussian(matrix, sigma=0.9):
+def apply_spline_filter(matrix, lmbda=5):
     """
-    Apply gaussian filter on input matrix.
+    Apply spline filter on input matrix.
     Return ndArray
     """
-    gaussian_applied= gaussian_filter(matrix, sigma)
+    gaussian_applied= spline_filter(matrix, lmbda=lmbda) * 2
     gaussian_applied[ matrix>0 ]= matrix[matrix>0]
     return gaussian_applied
 
@@ -98,11 +99,11 @@ if __name__ == "__main__":
     input_profile = None
     with rasterio.open(reference_image) as input_dst:
         input_profile = input_dst.profile
-    input_profile.update(nodata= -32768)
+    input_profile.update(nodata= 0)
     
     out_matrix=rasterize_gdf(shapes_gdf, input_profile, burn_column=burn_column)
     
-    #out_matrix = apply_gaussian(out_matrix)
+    out_matrix = apply_spline_filter(out_matrix)
     
     with rasterio.open(output_path, mode="w", **input_profile) as output_dst:
         output_dst.write(out_matrix,1)
