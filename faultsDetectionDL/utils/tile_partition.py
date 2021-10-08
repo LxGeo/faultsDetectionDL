@@ -37,6 +37,8 @@ def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder,
     # Get pixelSizeX, pixelSizeY    
     pixelSizeX, pixelSizeY = rgb_rio_dst.res
     
+    band_count = rgb_rio_dst.count
+    
     # Get the crs
     rgb_crs = rgb_rio_dst.crs
     
@@ -48,11 +50,11 @@ def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder,
         
         output_path_templ = output_folder+"/{0}/{{}}/{{}}_{{}}.tif".format(tile_type)
         with rio.open(output_path_templ.format('image',site_name, ID),
-                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=4, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_rgb_dst:
+                      'w', tiled=True, blockxsize=tile_sizex, blockysize=tile_sizey, driver="GTiff" , width=tile_sizex, height=tile_sizey, count=band_count, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_rgb_dst:
             output_rgb_dst.write(reshape_as_raster(rgb_matrix).astype(np.float32))
             
         with rio.open(output_path_templ.format('gt',site_name, ID),
-                      'w', driver="GTiff" , width=tile_sizex, height=tile_sizey, count=1, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_gt_dst:
+                      'w',  tiled=True, blockxsize=tile_sizex, blockysize=tile_sizey, driver="GTiff" , width=tile_sizex, height=tile_sizey, count=1, crs=rgb_crs, transform=geotransform, nodata=0, dtype=rio.float32) as output_gt_dst:
             output_gt_dst.write(reshape_as_raster(gt_matrix).astype(np.float32))
     
     for c_row in tqdm(tiles_gdf.iterrows(), desc="Iterating grids", total=len(tiles_gdf)):
