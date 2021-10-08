@@ -74,8 +74,8 @@ def run_grid_creation(rgb_rio_dst, valid_geometry, tile_size):
             grid_list.append(c_box)
             label_list.append(-1)
             
-            out_gdf=gpd.GeoDataFrame({"geometry":grid_list, "TTV": label_list})
-            out_gdf.crs=rgb_rio_dst.crs
+    out_gdf=gpd.GeoDataFrame({"geometry":grid_list, "TTV": label_list})
+    out_gdf.crs=rgb_rio_dst.crs
     
     return out_gdf
 
