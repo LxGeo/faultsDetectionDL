@@ -25,10 +25,10 @@ def get_filtered_files(folder_to_search, include_extension=(".tif",) ):
 
 class FaultsDataset(Dataset):
     
-    def __init__(self, data_dir, augmentation_transforms=None, image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",)):
-                
+    def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3 ,image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",)):
+        
         self.img_dir = data_dir
-        assert os.path.isdir(data_dir)        
+        assert os.path.isdir(data_dir), "Can't find path {}".format(data_dir)
         self.image_dir = os.path.join(data_dir, image_sub_dir)
         self.label_dir = os.path.join(data_dir, label_sub_dir)
         
@@ -40,6 +40,10 @@ class FaultsDataset(Dataset):
         
         self.augmentation_transforms = augmentation_transforms
         self.augmented_count = len(augmentation_transforms) * self.non_augmented_images_count
+        
+        self.img_bands=img_bands
+        #ENcoder related preprocessing
+        self.preprocessing=preprocessing
         
 
     def __len__(self):
@@ -53,11 +57,15 @@ class FaultsDataset(Dataset):
         img_path = self.images_paths[image_idx]
         label_path = self.labels_paths[image_idx]
         
-        img = imread(img_path)
+        img = imread(img_path)[:,:,0:self.img_bands]
         label = imread(label_path)
         
         c_trans = self.augmentation_transforms[transform_idx]
         img, label = c_trans.apply_transformation(img, label)
+        
+        if self.preprocessing:
+            #img[:,:,0:3] = self.preprocessing(img[:,:,0:3])
+            img = self.preprocessing(img)
         
         label = np.expand_dims(label, axis=-1)
         label = torch.from_numpy(label.copy()).permute(2, 0, 1).float()
