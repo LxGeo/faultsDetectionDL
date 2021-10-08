@@ -24,6 +24,9 @@ from faultsDetectionDL.prediction.model_loader import GenericModel,get_model_wra
 
 framework_options = GenericModel._available_frameworks
 
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     """
@@ -36,7 +39,8 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     inv_rotated_central_pixel_position=inv_rotated_array.shape[0]//2, inv_rotated_array.shape[1]//2
     
     output_profile = to_rotate_back_dst.profile.copy()
-    output_profile.update(height=reference_dst.height, width=reference_dst.width, transform=reference_dst.transform)
+    output_profile.update(tiled=True, blockxsize=256, blockysize=256,
+                          height=reference_dst.height, width=reference_dst.width, transform=reference_dst.transform)
     with rio.open(output_path,mode="w+", **output_profile) as out_dst:
         out_dst.write( reshape_as_raster(
             inv_rotated_array[ 
@@ -48,7 +52,7 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     
 
 def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy, custom_objects_config,
-                         patch_size, num_bands, num_classes, framework_model_wrapper, backbone):
+                         patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone):
     """
     Runs prediction for site using a set of 
     """
@@ -63,8 +67,8 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
     ang_raster_map = { 0:site_rio_dst }
     
     for c_angle in rot_angles:
-        if (c_angle==0):
-            continue
+        """if (c_angle==0):
+            continue"""
         print("Creating rotation raster for angle {}".format(c_angle))
         
         rotated_array = rotate_image(reshape_as_image(site_rio_dst.read()), c_angle, resize=True, preserve_range=True)
@@ -76,6 +80,9 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
         with tempfile.NamedTemporaryFile(delete=False) as c_rotated_raster_tmpfile:
             c_rotated_raster_dst = rio.open(c_rotated_raster_tmpfile.name,
                                'w+', driver='GTiff',
+                               tiled=True,
+                               blockxsize=patch_size,
+                               blockysize=patch_size,
                                height=rotated_array.shape[0],
                                width=rotated_array.shape[1],
                                count=rotated_array.shape[2],
@@ -83,21 +90,25 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
                                crs=site_crs,
                                transform=new_geotransform)
             c_rotated_raster_dst.write(reshape_as_raster(rotated_array).astype(c_rotated_raster_dst.meta["dtype"]))
+            c_rotated_raster_dst.close()
+            c_rotated_raster_dst = rio.open(c_rotated_raster_tmpfile.name, "r")
             ang_raster_map[c_angle] = c_rotated_raster_dst
-    
+            
+            
     for c_checkpoint_path in checkpoints_paths:
         checkpoint_name = os.path.basename(c_checkpoint_path)
         print("Prediction for checkpoint: {}".format(checkpoint_name))
         c_checkpoint_output_folder = os.path.join(output_folder, checkpoint_name)
         if not (os.path.isdir(c_checkpoint_output_folder)):
             os.makedirs(c_checkpoint_output_folder)
-        c_loaded_model = framework_model_wrapper(c_checkpoint_path, backbone=backbone, n_classes=num_classes)
+        c_loaded_model = framework_model_wrapper(c_checkpoint_path, pretrained_weights=pretrained_weights, backbone=backbone, n_classes=num_classes)
         for c_angle in ang_raster_map: 
             c_rotated_raster_dst = ang_raster_map[c_angle]
             pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, n_classes=num_classes, num_bands=num_bands)
             pred_startegy.fill_out_dataset()
             # saving c_angle back rotation image in current checkpoint folder
             c_back_rot_path = os.path.join(c_checkpoint_output_folder, "pred_rot_{}.tif".format(c_angle))
+            print("Applying reverse rotation!")
             inv_rotate_raster( pred_startegy.out_rio_dst, ang_raster_map[0], c_angle, c_back_rot_path )
             pass
         
@@ -115,14 +126,15 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
 @click.option('-ps', '--patch_size', type=int, required=True, help="Patch size used at training phase")
 @click.option('-nb', '--num_bands', type=int, required=True, help="Number of bands used while training phase")
 @click.option('-nc', '--num_classes', type=int, required=True, help="Number of bands used while training phase")
-@click.option('-bb', '--backbone', type=str, required=False, default=None, help="Backbone used in sm")
+@click.option('-bb', '--backbone', type=str, required=True, help="Backbone used in sm")
+@click.option('-pw', '--pretrained_weights', type=str, required=True, help="Pretrained weights for the backbone")
 @click.option('-fn', '--framework_name', required=True, default=None,type=click.Choice(framework_options, case_sensitive=False), help="Framework used for predicition")
-def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, framework_name):
+def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, pretrained_weights, framework_name):
     """
     """
     if (0 not in rot_angles):
         print("Addding angle 0 to rot_angles")
-        rot_angles = rot_angles + (0,)
+        #rot_angles = rot_angles + (0,)
     
     if( len(set(rot_angles)) != len(rot_angles)):
         print("Some rotation angles are duplicated!")
@@ -134,7 +146,7 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
         print("Exiting multiprediction!")
         return
     
-    model_extension=".hdf5"
+    model_extension=".hdf5" if framework_name.lower()=="tf" else ".pth"
     if len(checkpoints_paths)==1 and os.path.isdir(checkpoints_paths[0]):
         list_of_files_in_dir = os.listdir(checkpoints_paths[0])
         list_of_files_in_dir = [ os.path.join(checkpoints_paths[0], c_file) for c_file in list_of_files_in_dir ]
@@ -150,7 +162,7 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
     custom_config=None
     with rio.open(site_raster_path) as site_rio_dst:
         run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy,
-                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, backbone)
+                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone)
 
 
 if __name__ == "__main__":
