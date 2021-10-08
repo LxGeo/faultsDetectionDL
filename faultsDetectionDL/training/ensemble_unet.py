@@ -38,7 +38,7 @@ TRAIN_PATH = DATA_PATH_TMPL.format("train")
 path, dirs, train_ids = next(os.walk(TRAIN_PATH + '/image/'))
 VALID_PATH = DATA_PATH_TMPL.format("valid")
 valid_path, dirs, valid_ids = next(os.walk(VALID_PATH + '/image/'))
-models_path="./models/ensemble/jacc_n_catce"
+models_path="./models/ensemble/jacc_n_catce_model7"
 if (not os.path.isdir(models_path)):
     os.makedirs(models_path)
 
@@ -49,7 +49,7 @@ augmentation_factor = len(rt.all_transformed)
 augmented_train_cnt = augmentation_factor*len(train_ids)
 augmented_valid_cnt = augmentation_factor*len(valid_ids)
 
-train_images = np.empty((augmented_train_cnt,SIZE_X, SIZE_Y,IMG_CHANNELS), dtype=np.int8) 
+train_images = np.empty((augmented_train_cnt,SIZE_X, SIZE_Y,IMG_CHANNELS), dtype=np.uint8) 
 train_masks =np.empty((augmented_train_cnt,SIZE_X, SIZE_Y,1), dtype=np.byte) 
 
 train_im_count=0
@@ -68,7 +68,7 @@ for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
     for aug_n ,c_augmented_couple in enumerate(c_all_trans) :
         #train_images.append(c_augmented_couple[0]*255)
         #train_masks.append( np.expand_dims(c_augmented_couple[1], axis=-1) )
-        train_images[train_im_count, :,:,:] = (c_augmented_couple[0]).astype(np.int8)
+        train_images[train_im_count, :,:,:] = (c_augmented_couple[0]).astype(np.uint8)
         train_masks[train_im_count, :,:,:] = np.expand_dims(c_augmented_couple[1], axis=-1)
         train_im_count=train_im_count+1
 
@@ -78,7 +78,7 @@ train_masks = train_masks[:train_im_count,:,:,:]
 #train_masks = np.array(train_masks)
 
 
-valid_images = np.empty((augmented_valid_cnt,SIZE_X, SIZE_Y,IMG_CHANNELS), dtype=np.int8) 
+valid_images = np.empty((augmented_valid_cnt,SIZE_X, SIZE_Y,IMG_CHANNELS), dtype=np.uint8) 
 valid_masks = np.empty((augmented_valid_cnt,SIZE_X, SIZE_Y,1), dtype=np.byte) 
 
 valid_im_count=0
@@ -90,7 +90,7 @@ for n, id_ in tqdm(enumerate(valid_ids), total=len(valid_ids)):
     RT.run_recurse(RT.image_couple, images_transformations_list, [])
     c_all_trans = RT.all_transformed
     for aug_n ,c_augmented_couple in enumerate(c_all_trans):
-        valid_images[valid_im_count, :,:,:] = (c_augmented_couple[0]).astype(np.int8)
+        valid_images[valid_im_count, :,:,:] = (c_augmented_couple[0]).astype(np.uint8)
         valid_masks[valid_im_count, :,:,:] = np.expand_dims(c_augmented_couple[1], axis=-1)
         valid_im_count+=1
     
@@ -112,6 +112,13 @@ valid_np_save_path = os.path.join(VALID_PATH, "valid.npz")
 #np.savez(valid_np_save_path, valid_images, valid_masks)
 loaded_valid = np.load(valid_np_save_path)
 valid_images, valid_masks = [loaded_valid[k] for k in loaded_valid ]
+
+################################################## data reduction #################
+
+train_images = train_images.astype(np.uint8)
+train_masks = train_masks.astype(np.uint8)
+valid_images = valid_images.astype(np.uint8)
+valid_masks = valid_masks.astype(np.uint8)
 
 ############################## CAtegorical enconding ########################
 
@@ -166,7 +173,7 @@ def get_model_callbacks(model_save_path):
     #earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='min')
     #mcp_save_best = ModelCheckpoint(model_save_path, save_best_only=True, monitor='val_loss', mode='min')
     mcp_save_all = ModelCheckpoint(model_save_path, monitor='val_loss', verbose=0, save_best_only=False, save_weights_only=False, mode='auto', period=1)
-    #reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=7, verbose=1, epsilon=1e-4, mode='min')
+    #reduce_lr_loss = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3, verbose=1, epsilon=1e-4, mode='min')
     return [mcp_save_all]
     
 
@@ -181,7 +188,10 @@ X_train1 = train_images#preprocess_input1(train_images.copy())
 X_test1 = valid_images#preprocess_input1(valid_images.copy())
 
 # define model
-model1 = sm.Unet(BACKBONE1 , encoder_weights='imagenet', classes=n_classes, activation=activation)
+model1 = sm.Unet(BACKBONE1 , encoder_weights='imagenet', classes=n_classes, activation=activation,
+                 input_shape=(256, 256, IMG_CHANNELS),
+                 decoder_filters = (512, 512,256,64, 16),
+                 decoder_block_type="transpose")
 
 #model1 = multi_gpu_model(model1, gpus=2)
 # compile keras model with defined optimozer, loss and metrics
@@ -194,7 +204,7 @@ print(model1.summary())
 
 history1=model1.fit(X_train1, 
           train_masks_cat,
-          batch_size=32, 
+          batch_size=16, 
           epochs=50,
           verbose=1,
           validation_data=(X_test1, valid_masks_cat),
@@ -227,8 +237,8 @@ print(model2.summary())
 
 history2=model2.fit(X_train2, 
           train_masks_cat,
-          batch_size=16, 
-          epochs=50,
+          batch_size=32, 
+          epochs=80,
           verbose=1,
           validation_data=(X_test2, valid_masks_cat),
           callbacks = get_model_callbacks(models_path+'/inceptionv3_backbone_epoch_{epoch:02d}.hdf5'))
@@ -289,11 +299,11 @@ print(model4.summary())
 
 
 history1=model4.fit(X_train1, 
-          train_masks,
+          train_masks_cat,
           batch_size=8, 
           epochs=50,
           verbose=1,
-          validation_data=(X_test1, valid_masks),
+          validation_data=(X_test1, valid_masks_cat),
           callbacks = get_model_callbacks(models_path+'/res34_backbone_linknet_early_epoch.hdf5'))
 
 ##########################################################
@@ -325,6 +335,34 @@ history1=model5.fit(X_train2,
           callbacks = get_model_callbacks(models_path+'/inceptionv3_backbone_linknet_epoch_{epoch:02d}.hdf5'))
 
 ##########################################################
+#### Model 6 
+BACKBONE1 = "resnet34"
+X_train1 = train_images#preprocess_input1(train_images.copy())
+X_test1 = valid_images#preprocess_input1(valid_images.copy())
+
+# define model
+model6 = sm.FPN(BACKBONE1 , encoder_weights='imagenet', classes=n_classes, activation=activation,
+                 input_shape=(256, 256, IMG_CHANNELS), pyramid_dropout=0.1)
+
+#model1 = multi_gpu_model(model1, gpus=2)
+# compile keras model with defined optimozer, loss and metrics
+model6.compile(optim, loss=total_loss, metrics=metrics)
+
+#model1.compile(optimizer='adam', loss='categorical_crossentropy', metrics=metrics)
+
+print(model6.summary())
+
+
+history1=model6.fit(X_train1, 
+          train_masks_cat,
+          batch_size=16, 
+          epochs=50,
+          verbose=1,
+          validation_data=(X_test1, valid_masks_cat),
+          callbacks = get_model_callbacks(models_path+'/res34_backbone_epoch_{epoch:02d}.hdf5'))
+
+
+
 
 ###
 #plot the training and validation accuracy and loss at each epoch

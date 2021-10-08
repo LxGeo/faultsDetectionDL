@@ -1,0 +1,27 @@
+model_name = "Unet_resnext101_32x8d"
+ENCODER = 'resnext101_32x8d'
+ENCODER_WEIGHTS = 'imagenet'
+model = smp.Unet(
+    encoder_name=ENCODER,
+    encoder_weights=ENCODER_WEIGHTS, 
+    in_channels=IMG_CHANNELS,
+    classes=n_classes,
+    activation=activation,
+    decoder_use_batchnorm=False,
+    decoder_channels=[512,512,256,128,64],
+    decoder_attention_type="scse"
+)
+
+LR = 0.0001
+optimizer = torch.optim.Adam
+
+SIZE_X = 256
+SIZE_Y = 256
+IMG_CHANNELS=3
+n_classes=1 #Number of classes for segmentation
+class_weights= 0.93
+BATCH_SIZE=8
+activation='sigmoid'
+
+
+##########################################
