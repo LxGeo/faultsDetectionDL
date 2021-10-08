@@ -72,8 +72,8 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
                                transform=new_geotransform) as rgb_rotated_dst:
                 
                 with tempfile.NamedTemporaryFile(delete=False) as gt_rotated_tmpfile:
-                    with rio.open(gt_rotated_tmpfile.name,
-                                       'w+', driver='GTiff',
+                    with rio.open(gt_rotated_tmpfile.name, 'w+', driver='GTiff',
+                                  tiled=True, blockxsize=tile_size, blockysize=tile_size,
                                        height=gt_rotated.shape[0],
                                        width=gt_rotated.shape[1],
                                        count=1,
