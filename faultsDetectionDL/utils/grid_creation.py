@@ -22,7 +22,7 @@ Usage :
         python grid_creation.py RGB_file_path valid_shapefile_path output_shapefile_path tile_size 
 """    
 
-def run_grid_creation(rgb_rio_dst, valid_geometry, tile_size):
+def run_grid_creation(rgb_rio_dst, train_bbox , valid_geometry, tile_size):
     """
     Inputs:
         RGB rasterio dataset
@@ -32,7 +32,7 @@ def run_grid_creation(rgb_rio_dst, valid_geometry, tile_size):
         geodataframe of grids that contains geometry list and label list
     """
     #Define the dataset boundaries
-    all_zone_geometry = box(*rgb_rio_dst.bounds)
+    all_zone_geometry = train_bbox
 
     # Define the RGB image width and height
     size = rgb_rio_dst.shape
@@ -40,7 +40,7 @@ def run_grid_creation(rgb_rio_dst, valid_geometry, tile_size):
     IMG_WIDTH = rgb_rio_dst.width
 
     # Assert valid zone in RGB Dataset
-    assert(valid_geometry.within(all_zone_geometry))
+    #assert(valid_geometry.within(all_zone_geometry))
 
     # Define the grid blocks
     Nx_blocks = math.ceil(IMG_WIDTH/tile_size)
@@ -54,6 +54,12 @@ def run_grid_creation(rgb_rio_dst, valid_geometry, tile_size):
             win = Window(ix*tile_size, iy*tile_size, tile_size, tile_size)
             
             c_box = box(*rasterio.windows.bounds(win,rgb_rio_dst.transform))
+            
+            # out of extents
+            if (not c_box.intersects(all_zone_geometry)):
+                 grid_list.append(c_box)
+                 label_list.append(-1)
+                 continue
             
             if (c_box.intersects(valid_geometry)):
                 grid_list.append(c_box)

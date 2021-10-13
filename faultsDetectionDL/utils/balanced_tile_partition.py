@@ -12,23 +12,30 @@ import geopandas as gpd
 from rasterio.plot import reshape_as_raster, reshape_as_image
 from shapely.affinity import rotate as rotate_geometry
 from skimage.transform import rotate as rotate_image
-from shapely.geometry import box
+from shapely.geometry import box, Polygon
 import tempfile
 import affine
+import click
 
 from faultsDetectionDL.utils.grid_creation import run_grid_creation
 from faultsDetectionDL.utils.tile_partition import run_partition
+from faultsDetectionDL.utils.large_rasters_utils import rotate_large_raster
 
 import sys,os
 
 
-def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst, 
+def run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_dst, gt_rio_dst, 
                            tile_size, output_folder, tile_type_column):
     
     x_size = rgb_rio_dst.transform[0]
     y_size = -rgb_rio_dst.transform[4]
     # Set the list of rotation angles
     angles_list = [0, 45, 90]
+    
+    train_rgb, out_transform = rio.mask.mask(rgb_rio_dst, [train_geometry], crop=True)
+    train_rgb = reshape_as_image(train_rgb)
+    train_gt, _ = rio.mask.mask(gt_rio_dst, [train_geometry], crop=True)
+    train_gt = reshape_as_image(train_gt)
     
     for angle in angles_list:
         
@@ -37,20 +44,19 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
         print( "Running partition for angle {} ".format(angle) )
 
         # Rotate RGB and gtreshape_as_image
-        rgb_rio_raster = rgb_rio_dst.read()
-        gt_rio_raster = gt_rio_dst.read()
-        #accross_bands_no_data = np.invert(rgb_rio_raster.min(axis=0).astype(bool))
-        accross_bands_no_data = (rgb_rio_raster.min(axis=0)==255)
-        rgb_rio_raster[:, accross_bands_no_data] = 0
-        gt_rio_raster[:, accross_bands_no_data] = 0
-        rgb_rotated = rotate_image(reshape_as_image(rgb_rio_raster), angle, resize=True, preserve_range=True)
-        gt_rotated = rotate_image(reshape_as_image(gt_rio_raster), angle, resize=True, preserve_range=True)
+        #rgb_rotated = rotate_image(reshape_as_image(rgb_rio_raster), angle, resize=True, preserve_range=True)
+        #gt_rotated = rotate_image(reshape_as_image(gt_rio_raster), angle, resize=True, preserve_range=True)
         
+        rgb_rotated = rotate_large_raster(train_rgb, angle)
+        gt_rotated = rotate_large_raster(train_gt, angle)
         assert((rgb_rotated.shape[0] == gt_rotated.shape[0]) and (rgb_rotated.shape[1] == gt_rotated.shape[1]))
         
         # Creating new geotransformp for rotated rasters
-        rgb_zone_geometry = box(*rgb_rio_dst.bounds)
+        rgb_zone_geometry = box(*train_geometry.bounds)
         rotated_zone_envelop_bounds = rotate_geometry(rgb_zone_geometry, angle).bounds
+        
+        # Rotate train geometry
+        rotated_train_geometry = rotate_geometry(train_geometry, angle, origin=rgb_zone_geometry.centroid)
         
         # Rotate valid geometry
         rotated_valid_geometry = rotate_geometry(valid_geometry, angle, origin=rgb_zone_geometry.centroid)
@@ -61,7 +67,7 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
             x_size, y_size)
         #new_geotransform= new_geotransform* affine.Affine.rotation(-angle, pivot=rgb_zone_geometry.centroid.coords[0])
         
-        with tempfile.NamedTemporaryFile(delete=False) as rgb_rotated_tmpfile:
+        with tempfile.NamedTemporaryFile(delete=True) as rgb_rotated_tmpfile:
             with rio.open(rgb_rotated_tmpfile.name,
                                'w+', driver='GTiff',
                                height=rgb_rotated.shape[0],
@@ -71,7 +77,7 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
                                crs=rgb_rio_dst.crs,
                                transform=new_geotransform) as rgb_rotated_dst:
                 
-                with tempfile.NamedTemporaryFile(delete=False) as gt_rotated_tmpfile:
+                with tempfile.NamedTemporaryFile(delete=True) as gt_rotated_tmpfile:
                     with rio.open(gt_rotated_tmpfile.name, 'w+', driver='GTiff',
                                   tiled=True, blockxsize=tile_size, blockysize=tile_size,
                                        height=gt_rotated.shape[0],
@@ -88,38 +94,47 @@ def run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst,
                         gt_rotated_dst.write(reshape_as_raster(gt_rotated).astype(gt_rotated_dst.meta["dtype"]))
                         
                         # tile grid creation
-                        grid_gdf = run_grid_creation(rgb_rotated_dst, rotated_valid_geometry, tile_size)
+                        grid_gdf = run_grid_creation(rgb_rotated_dst, rotated_train_geometry, rotated_valid_geometry, tile_size)
                         
                         # tile partition
                         run_partition(c_site_name, grid_gdf, rgb_rotated_dst, gt_rotated_dst, 
                                       output_folder, tile_type_column)
                 
 
-
-
-if __name__ == "__main__" :
-    if len(sys.argv) <8:
-        print("Missing arguments!")
-        #print_help()
-        sys.exit(1)
+@click.command()
+@click.argument('site_name')
+@click.argument('rgb_path', type=click.Path(exists=True))
+@click.argument('gt_path', type=click.Path(exists=True))
+@click.argument('output_folder', type=click.Path(file_okay=True))
+@click.option('-vshp','--valid_shp_path', required=False, type=click.Path(exists=True))
+@click.option('-tshp','--train_shp_path', required=False, type=click.Path(exists=True))
+@click.option('-ts','--tile_size', type=click.IntRange(10, 2**15), required=True)
+@click.option('-t_t_c', '--tile_type_column', type=str, required=True)
+def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_path, tile_size, tile_type_column):
+    
+    train_geometry = Polygon()
+    with rio.open(rgb_path) as rgb_rio_dst:
+        train_geometry=box(*rgb_rio_dst.bounds)
+    
+    valid_geometry = Polygon()
+    
+    if train_shp_path:
+        train_shp = gpd.read_file(train_shp_path) 
+        train_geometry = train_shp.geometry[0]
+    
+    if valid_shp_path:
+        valid_shp = gpd.read_file(valid_shp_path) 
+        valid_geometry = valid_shp.geometry[0]
         
-    site_name =sys.argv[1]
-    valid_shp_path = sys.argv[2]
-    rgb_path = sys.argv[3]
-    gt_path = sys.argv[4]
-    tile_size = sys.argv[5]
-    tile_size = int(tile_size)
-    output_folder = sys.argv[6]
-    tile_type_column=sys.argv[7]
-    
-    valid_shp = gpd.read_file(valid_shp_path) 
-    valid_geometry = valid_shp.geometry[0]
-    
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
     
     with rio.open(rgb_path) as rgb_rio_dst:
         with rio.open(gt_path) as gt_rio_dst:        
-            run_balanced_partition(site_name, valid_geometry, rgb_rio_dst, gt_rio_dst, 
+            run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_dst, gt_rio_dst, 
                                tile_size, output_folder, tile_type_column)
    
+
+if __name__ == "__main__" :
+    main()
+    
