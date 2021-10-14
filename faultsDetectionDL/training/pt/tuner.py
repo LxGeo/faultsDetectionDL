@@ -20,7 +20,7 @@ from faultsDetectionDL.training.pt import TRAIN_PATH,VALID_PATH, IMG_CHANNELS, \
 
 config = {
     "LR": tune.loguniform(1e-6, 1e-3),
-    "BATCH_SIZE": tune.choice([4, 8, 16, 32]),
+    "BATCH_SIZE": tune.choice([16, 32]),
     "optim" : tune.choice([
         torch.optim.Adam
         ]),
@@ -29,8 +29,21 @@ config = {
         "512,512,256,256,64",
         "512,512,256,128,64"
         ]),
-    "decoder_use_batchnorm": tune.choice([ True ]),
+    "decoder_use_batchnorm": tune.choice([ True, False ]),
     "arch":tune.choice([ smp.Unet, smp.UnetPlusPlus, smp.ResUnet, smp.MAnet ]),
+    "encoder_weights" : tune.choice([
+        "resnet152==imagenet",
+        "resnet101==imagenet",
+        "resnext50_32x4d==imagenet",
+        "resnext101_32x4d==ssl",
+        "resnext101_32x8d==imagenet",
+        "resnext101_32x16d==imagenet",
+        "se_resnet50==imagenet",
+        "se_resnet101==imagenet",
+        "se_resnet152==imagenet",
+        "se_resnext50_32x4d==imagenet",
+        "timm-regnetx_160==imagenet"
+        ])
     
 }
 
@@ -42,9 +55,11 @@ def train_with_config( config ):
     dc_list = list(map(int, dc_str.split(",")))
     arch = config["arch"]
     
+    ENCODER, ENCODER_WEIGHTS = config["encoder_weights"].split("==")
+    
     #model_name = "Unet_resnext101_32x8d"
-    ENCODER = 'resnext101_32x8d'
-    ENCODER_WEIGHTS = 'imagenet'
+    #ENCODER = 'resnext101_32x8d'
+    #ENCODER_WEIGHTS = 'imagenet'
     model = arch(
         encoder_name=ENCODER,
         encoder_weights=ENCODER_WEIGHTS, 
