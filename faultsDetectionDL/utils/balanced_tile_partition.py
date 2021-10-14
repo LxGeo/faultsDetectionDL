@@ -25,7 +25,7 @@ import sys,os
 
 
 def run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_dst, gt_rio_dst, 
-                           tile_size, output_folder, tile_type_column):
+                           tile_size, output_folder):
     
     x_size = rgb_rio_dst.transform[0]
     y_size = -rgb_rio_dst.transform[4]
@@ -95,10 +95,9 @@ def run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_ds
                         
                         # tile grid creation
                         grid_gdf = run_grid_creation(rgb_rotated_dst, rotated_train_geometry, rotated_valid_geometry, tile_size)
-                        
                         # tile partition
                         run_partition(c_site_name, grid_gdf, rgb_rotated_dst, gt_rotated_dst, 
-                                      output_folder, tile_type_column)
+                                      output_folder)
                 
 
 @click.command()
@@ -109,8 +108,7 @@ def run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_ds
 @click.option('-vshp','--valid_shp_path', required=False, type=click.Path(exists=True))
 @click.option('-tshp','--train_shp_path', required=False, type=click.Path(exists=True))
 @click.option('-ts','--tile_size', type=click.IntRange(10, 2**15), required=True)
-@click.option('-t_t_c', '--tile_type_column', type=str, default="TTV")
-def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_path, tile_size, tile_type_column):
+def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_path, tile_size):
     
     print("Running for site: {}".format(site_name))
     
@@ -141,7 +139,7 @@ def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_
     with rio.open(rgb_path) as rgb_rio_dst:
         with rio.open(gt_path) as gt_rio_dst:        
             run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_dst, gt_rio_dst, 
-                               tile_size, output_folder, tile_type_column)
+                               tile_size, output_folder)
     
     save_file_path = os.path.join(output_folder, "sites_processed.txt")
     with open(save_file_path, 'a+') as file:

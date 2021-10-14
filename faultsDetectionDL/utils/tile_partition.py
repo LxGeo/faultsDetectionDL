@@ -19,8 +19,7 @@ import numpy as np
 
 #import math
 
-def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder, 
-                  tile_type_column="TTV"):
+def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder):
     
     for tile_type_name in ["valid", "train"]:
         for img_type_name in ["image", "gt"]:
@@ -81,8 +80,7 @@ def run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder,
 def print_help():
     
     help_message="""
-        python tile_partition.py site_name tiles_shp_path rgb_path gt_path output_folder *[tile_type_column] *[transform_count_column] 
-        Default: *tile_type_column="TTV"
+        python tile_partition.py site_name tiles_shp_path rgb_path gt_path output_folder
     """
     print(help_message)
     
@@ -101,17 +99,7 @@ if __name__=="__main__":
     
     # load gdf
     tiles_gdf=gpd.read_file( tiles_shp_path )
-    
-    tile_type_column="TTV"
-    
-    if len(sys.argv) == 7:
-        tile_type_column=sys.argv[6]
-        if tile_type_column not in tiles_gdf.columns:
-            print("Missing tile type column {} !".format(tile_type_column))
-            print("Existing columns: {}".format(tiles_gdf.columns))
-            sys.exit(1)
-                
+                    
     with rio.open(rgb_path,'r') as rgb_rio_dst:
         with rio.open(gt_path,'r') as gt_rio_dst:
-            run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder, 
-                  tile_type_column)
+            run_partition(site_name, tiles_gdf, rgb_rio_dst, gt_rio_dst, output_folder)
