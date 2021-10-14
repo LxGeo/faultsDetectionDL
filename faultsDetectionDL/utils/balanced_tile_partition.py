@@ -109,21 +109,30 @@ def run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_ds
 @click.option('-vshp','--valid_shp_path', required=False, type=click.Path(exists=True))
 @click.option('-tshp','--train_shp_path', required=False, type=click.Path(exists=True))
 @click.option('-ts','--tile_size', type=click.IntRange(10, 2**15), required=True)
-@click.option('-t_t_c', '--tile_type_column', type=str, required=True)
+@click.option('-t_t_c', '--tile_type_column', type=str, default="TTV")
 def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_path, tile_size, tile_type_column):
     
+    print("Running for site: {}".format(site_name))
+    
+    site_crs = None
     train_geometry = Polygon()
     with rio.open(rgb_path) as rgb_rio_dst:
+        site_crs = rgb_rio_dst.crs
         train_geometry=box(*rgb_rio_dst.bounds)
-    
-    valid_geometry = Polygon()
-    
+        
     if train_shp_path:
-        train_shp = gpd.read_file(train_shp_path) 
+        train_shp = gpd.read_file(train_shp_path)
+        assert len(train_shp.geometry)==1, "Train zone shapefile contains 0 or more than one geometry!"
+        if train_shp.crs != site_crs:
+            train_shp = train_shp.to_crs(site_crs)
         train_geometry = train_shp.geometry[0]
     
+    valid_geometry = Polygon()
     if valid_shp_path:
         valid_shp = gpd.read_file(valid_shp_path) 
+        assert len(valid_shp.geometry)==1, "Valid zone shapefile contains 0 or more than one geometry!"
+        if valid_shp.crs != site_crs:
+            valid_shp = valid_shp.to_crs(site_crs)
         valid_geometry = valid_shp.geometry[0]
         
     if not os.path.isdir(output_folder):
@@ -133,6 +142,10 @@ def main(site_name, rgb_path, gt_path, output_folder, valid_shp_path, train_shp_
         with rio.open(gt_path) as gt_rio_dst:        
             run_balanced_partition(site_name, train_geometry, valid_geometry, rgb_rio_dst, gt_rio_dst, 
                                tile_size, output_folder, tile_type_column)
+    
+    save_file_path = os.path.join(output_folder, "sites_processed.txt")
+    with open(save_file_path, 'a+') as file:
+        file.write("{}\n".format(site_name))        
    
 
 if __name__ == "__main__" :
