@@ -16,6 +16,7 @@ from rasterio.plot import reshape_as_raster, reshape_as_image
 from shapely.affinity import rotate as rotate_geometry
 from skimage.transform import rotate as rotate_image
 from shapely.geometry import box
+from faultsDetectionDL.utils.large_rasters_utils import rotate_large_raster
 
 from faultsDetectionDL.prediction.prediction_strategies import PatchOverlapStrategy
 import tempfile
@@ -34,7 +35,7 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     """
     #refrence_central_pixel_position = reference_dst.height//2, reference_dst.width//2
     
-    inv_rotated_array = rotate_image(reshape_as_image(to_rotate_back_dst.read()), -angle, resize=True, preserve_range=True, order=1)
+    inv_rotated_array = rotate_large_raster(reshape_as_image(to_rotate_back_dst.read()), -angle)
     #inv_rotated_array = np.round(inv_rotated_array)
     inv_rotated_central_pixel_position=inv_rotated_array.shape[0]//2, inv_rotated_array.shape[1]//2
     
@@ -71,13 +72,13 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
             continue"""
         print("Creating rotation raster for angle {}".format(c_angle))
         
-        rotated_array = rotate_image(reshape_as_image(site_rio_dst.read()), c_angle, resize=True, preserve_range=True)
+        rotated_array = rotate_large_raster(reshape_as_image(site_rio_dst.read()), c_angle)
         rotated_zone_envelop_bounds = rotate_geometry(site_zone_geometry, c_angle).bounds
         new_geotransform = rio.transform.from_origin(
             rotated_zone_envelop_bounds[0],
             rotated_zone_envelop_bounds[-1],
             x_size, y_size)
-        with tempfile.NamedTemporaryFile(delete=False) as c_rotated_raster_tmpfile:
+        with tempfile.NamedTemporaryFile(delete=True) as c_rotated_raster_tmpfile:
             c_rotated_raster_dst = rio.open(c_rotated_raster_tmpfile.name,
                                'w+', driver='GTiff',
                                tiled=True,
