@@ -25,7 +25,7 @@ def get_filtered_files(folder_to_search, include_extension=(".tif",) ):
 
 class FaultsDataset(Dataset):
     
-    def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3 ,image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",)):
+    def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3, num_classes=1 ,image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",)):
         
         self.img_dir = data_dir
         assert os.path.isdir(data_dir), "Can't find path {}".format(data_dir)
@@ -42,6 +42,7 @@ class FaultsDataset(Dataset):
         self.augmented_count = len(augmentation_transforms) * self.non_augmented_images_count
         
         self.img_bands=img_bands
+        self.num_classes = num_classes
         #ENcoder related preprocessing
         self.preprocessing=preprocessing
         
@@ -67,8 +68,11 @@ class FaultsDataset(Dataset):
             #img[:,:,0:3] = self.preprocessing(img[:,:,0:3])
             img = self.preprocessing(img)
         
-        label = np.expand_dims(label, axis=-1)
-        label = torch.from_numpy(label.copy()).permute(2, 0, 1).float()
+        if self.num_classes==1:
+            label = np.expand_dims(label, axis=-1)
+            label = torch.from_numpy(label.copy()).permute(2, 0, 1).float()
+        else:
+            label = torch.from_numpy(label.copy()).long()
         img = torch.from_numpy(img.copy()).permute(2, 0, 1).float()
         return img , label
         
