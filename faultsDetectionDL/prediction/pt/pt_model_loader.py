@@ -55,7 +55,7 @@ class PtModel(GenericModel):
                 output = self.loaded_model(inputs)
                 output = output.to(torch.device('cpu'))
                 if self.n_classes > 1:
-                    output = output.data.numpy().argmax()
+                    output = np.expand_dims(output.numpy().argmax(axis=1), axis=1)
                 else:
                     output = output.data.numpy()
                 preds[self.batch_size*c_batch_idx: self.batch_size*(c_batch_idx+1), :, :, :] = output
