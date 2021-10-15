@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import segmentation_models_pytorch as smp
 from faultsDetectionDL.training.pt import TRAIN_PATH,VALID_PATH, IMG_CHANNELS, BATCH_SIZE, \
-    n_classes, class_weights, activation, models_path, model_name_template
+    n_classes, class_weights, activation, models_path, model_name_template, DEVICE
 from torch.utils.data import TensorDataset, DataLoader
 from faultsDetectionDL.utils.image_transformation import images_transformations_list, Trans_Identity
 from faultsDetectionDL.data.pt.faults_dataset import FaultsDataset 
@@ -38,8 +38,8 @@ preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, ENCODER_WEIGHTS)
 
 
 ############### Load data
-train_dataset = FaultsDataset(TRAIN_PATH, images_transformations_list, preprocessing=preprocessing_fn, img_bands=IMG_CHANNELS)
-valid_dataset = FaultsDataset(VALID_PATH, images_transformations_list, preprocessing=preprocessing_fn, img_bands=IMG_CHANNELS)
+train_dataset = FaultsDataset(TRAIN_PATH, images_transformations_list, preprocessing=preprocessing_fn, img_bands=IMG_CHANNELS, num_classes=n_classes)
+valid_dataset = FaultsDataset(VALID_PATH, [Trans_Identity()], preprocessing=preprocessing_fn, img_bands=IMG_CHANNELS, num_classes=n_classes)
 
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=12)
 valid_dataloader = DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
@@ -47,8 +47,8 @@ valid_dataloader = DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=Fals
 
 ################# Optimizer definition
 metrics = [
-    smp.utils.metrics.IoU(threshold=0.5),
-    smp.utils.metrics.Fscore()
+    #smp.utils.metrics.IoU(threshold=0.5),
+    #smp.utils.metrics.Fscore()
 ]
 
 LR = 0.000291
@@ -58,14 +58,13 @@ optimizer = torch.optim.Adam([
 
 
 ################# loss definition
-from segmentation_models_pytorch.utils.losses import BCELoss , JaccardLoss
-from faultsDetectionDL.training.pt.custom_losses import neighborLoss
-total_loss = BCELoss(torch.tensor(class_weights)) + 0.2*JaccardLoss() 
-loss_name = "weighted_bce_n_jacc"
+from faultsDetectionDL.training.pt.custom_losses import wrap_jaccard_loss,wrap_ce_loss
+total_loss = wrap_ce_loss(torch.tensor(class_weights).to(DEVICE)) + 0.2*wrap_jaccard_loss() 
+loss_name = "weighted_cc_n_jacc"
 
 
 ####################
-DEVICE = 'cuda'
+
 train_epoch = smp.utils.train.TrainEpoch(
     model, 
     loss=total_loss, 
