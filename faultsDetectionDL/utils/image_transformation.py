@@ -56,7 +56,7 @@ class Trans_fliplr(Image_Transformation):
 class Trans_gaussian_noise(Image_Transformation):
     def apply_transformation(self, image1, gt1):
         noise = np.random.normal(loc = 0.0, scale = 2, size = image1.shape) 
-        image1_t = np.clip(image1+noise, 0 ,255)
+        image1_t = np.clip(image1+noise, 0 ,255).astype(image1.dtype)
         return (image1_t, gt1)
 
 class Trans_gamma_adjust(Image_Transformation):    
@@ -69,7 +69,7 @@ class Trans_gamma_adjust(Image_Transformation):
 
 class Trans_equal_hist(Image_Transformation):    
     def apply_transformation(self, image1, gt1):
-        image1_t = exposure.equalize_hist(image1)*255
+        image1_t = (exposure.equalize_hist(image1)*255).astype(image1.dtype)
         return (image1_t, gt1)
 
 class Trans_contrast_stretch(Image_Transformation):    
@@ -79,8 +79,7 @@ class Trans_contrast_stretch(Image_Transformation):
         return (image1_t, gt1)
 
 
-images_transformations_list=[Trans_fliplr(), Trans_Flipud(), Trans_gaussian_noise(), Trans_gamma_adjust(2),
-                             Trans_equal_hist(), Trans_contrast_stretch()]
+images_transformations_list=[Trans_fliplr(), Trans_Flipud(), Trans_gaussian_noise(), Trans_gamma_adjust(2)]
                              
 TDO = { images_transformations_list[i].__class__.__name__ : i for i in range(len(images_transformations_list)) }
 to_ignore_trans_lists=[]#[ [0,1,2] ]
