@@ -53,7 +53,7 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
     
 
 def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy, custom_objects_config,
-                         patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone):
+                         patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone, activation):
     """
     Runs prediction for site using a set of 
     """
@@ -102,7 +102,7 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
         c_checkpoint_output_folder = os.path.join(output_folder, checkpoint_name)
         if not (os.path.isdir(c_checkpoint_output_folder)):
             os.makedirs(c_checkpoint_output_folder)
-        c_loaded_model = framework_model_wrapper(c_checkpoint_path, pretrained_weights=pretrained_weights, backbone=backbone, n_classes=num_classes)
+        c_loaded_model = framework_model_wrapper(c_checkpoint_path, pretrained_weights=pretrained_weights, backbone=backbone, n_classes=num_classes, activation=activation)
         for c_angle in ang_raster_map: 
             c_rotated_raster_dst = ang_raster_map[c_angle]
             pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, n_classes=num_classes, num_bands=num_bands)
@@ -130,7 +130,8 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
 @click.option('-bb', '--backbone', type=str, required=True, help="Backbone used in sm")
 @click.option('-pw', '--pretrained_weights', type=str, required=True, help="Pretrained weights for the backbone")
 @click.option('-fn', '--framework_name', required=True, default=None,type=click.Choice(framework_options, case_sensitive=False), help="Framework used for predicition")
-def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, pretrained_weights, framework_name):
+@click.option('-act', '--activation', type=str, default=None, help="Activation to apply on output")
+def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, pretrained_weights, framework_name, activation):
     """
     """
     if (0 not in rot_angles):
@@ -163,7 +164,7 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
     custom_config=None
     with rio.open(site_raster_path) as site_rio_dst:
         run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy,
-                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone)
+                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone, activation)
 
 
 if __name__ == "__main__":
