@@ -19,7 +19,7 @@ import click
 
 from faultsDetectionDL.utils.grid_creation import run_grid_creation
 from faultsDetectionDL.utils.tile_partition import run_partition
-from faultsDetectionDL.utils.large_rasters_utils import rotate_large_raster
+from faultsDetectionDL.utils.large_rasters_utils import rotate_large_raster, rotate_large_array_to_file
 
 import sys,os
 

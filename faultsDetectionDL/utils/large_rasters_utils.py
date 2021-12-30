@@ -51,6 +51,15 @@ def vips2numpy(vi):
                       dtype=format_to_dtype[vi.format],
                       shape=[vi.height, vi.width, vi.bands])
 
+def rotate_large_array_to_file(in_raster_descriptor, rotation_angle, out_raster_descriptor):
+    """
+    Rotate tif files
+    """
+    vips_image = numpy2vips(in_raster_descriptor)
+    rot_vips_image = vips_image.rotate(rotation_angle)
+    rot_vips_image.write_to_file(out_raster_descriptor)
+    return
+
 def rotate_large_raster(raster_descriptor, rotation_angle):
     """
     Args:
