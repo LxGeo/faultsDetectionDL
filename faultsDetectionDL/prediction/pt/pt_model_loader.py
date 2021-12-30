@@ -11,6 +11,7 @@ import torch
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader
 import segmentation_models_pytorch as smp
+Activation = smp.base.modules.Activation
 from tqdm import tqdm
 
 class PtModel(GenericModel):
@@ -18,13 +19,14 @@ class PtModel(GenericModel):
     Pytroch model wrapper implementation
     """
     
-    def __init__(self, model_path, pretrained_weights, backbone=None, batch_size=16, n_classes=1, device="cuda"):
+    def __init__(self, model_path, pretrained_weights, backbone=None, batch_size=16, n_classes=1, activation=None, device="cuda"):
         GenericModel.__init__(self)
         self.loaded_model=torch.load(model_path, map_location=device)        
         self.pretrained_weights=pretrained_weights
         self.batch_size = batch_size
         self.n_classes = n_classes
         self.preprocesser = smp.encoders.get_preprocessing_fn(backbone, pretrained=pretrained_weights) if backbone else None
+        self.activation = Activation(activation)
         self.device=device
     
     def predict(self, data):
@@ -43,7 +45,7 @@ class PtModel(GenericModel):
         if type(data) == np.ndarray:
             tensor_x = torch.Tensor(data).permute(0, 3, 1, 2)
             temp_dst = TensorDataset(tensor_x, tensor_x)
-            dataloder = DataLoader(temp_dst, self.batch_size, shuffle=False, num_workers=4)
+            dataloder = DataLoader(temp_dst, self.batch_size, shuffle=False, num_workers=1)
         else:
             raise Exception("Unknown type for pytorch model prediction")
         
@@ -53,11 +55,13 @@ class PtModel(GenericModel):
             for c_batch_idx , (inputs, labels) in enumerate(tqdm(dataloder, desc="Batch prediction")):
                 inputs = inputs.to(self.device)
                 output = self.loaded_model(inputs)
+                output = self.activation(output)
                 output = output.to(torch.device('cpu'))
                 if self.n_classes > 1:
                     output = np.expand_dims(output.numpy().argmax(axis=1), axis=1)
                 else:
                     output = output.data.numpy()
+                
                 preds[self.batch_size*c_batch_idx: self.batch_size*(c_batch_idx+1), :, :, :] = output
             
         #preds_array = np.array(preds)
