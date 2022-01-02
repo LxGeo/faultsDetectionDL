@@ -12,7 +12,7 @@ class GenericModel():
     """
     Abstract class that defines models required methods
     """
-    _available_frameworks = ("tf", "pt")
+    _available_frameworks = ("tf", "pt", "ptl")
     preprocesser = None
     loaded_model = None
     
@@ -43,6 +43,14 @@ def get_model_wrapper(framework):
         try:
             from faultsDetectionDL.prediction.pt.pt_model_loader import PtModel
             return PtModel
+        except ImportError as e:
+            print("pytorch model wrapper could not be imported!\n Check python environment")
+            raise(e)
+    
+    elif framework.lower() == "ptl":
+        try:
+            from faultsDetectionDL.prediction.ptl.ptl_model_loader import PtlModel
+            return PtlModel
         except ImportError as e:
             print("pytorch model wrapper could not be imported!\n Check python environment")
             raise(e)

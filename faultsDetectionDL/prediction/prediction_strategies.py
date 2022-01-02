@@ -35,11 +35,10 @@ from tqdm import tqdm
 
 class PatchOverlapStrategy():
     
-    def __init__(self, ready_model, rio_dataset, patch_size, n_classes , num_bands=3, overlap_ratio=0.5):
+    def __init__(self, ready_model, rio_dataset, patch_size, n_classes, overlap_ratio=0.5):
         self.model = ready_model
         self.rio_dataset = rio_dataset
         self.patch_size = patch_size
-        self.num_bands = num_bands
         self.overlap_ratio=overlap_ratio
         self.pred_size = round(patch_size * overlap_ratio)
         self.pad_count = (self.patch_size-self.pred_size)//2
@@ -60,7 +59,7 @@ class PatchOverlapStrategy():
         
         """
         padded_array = np.pad( 
-            reshape_as_image(self.rio_dataset.read())[:,:,:self.num_bands],
+            reshape_as_image(self.rio_dataset.read()),
             ((self.pad_count, self.patch_size), (self.pad_count, self.patch_size), (0,0)) 
             )
                 

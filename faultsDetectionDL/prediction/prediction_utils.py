@@ -52,8 +52,8 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
             ) )
     
 
-def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy, custom_objects_config,
-                         patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone, activation):
+def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy,
+                         patch_size, framework_model_wrapper):
     """
     Runs prediction for site using a set of 
     """
@@ -102,10 +102,10 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
         c_checkpoint_output_folder = os.path.join(output_folder, checkpoint_name)
         if not (os.path.isdir(c_checkpoint_output_folder)):
             os.makedirs(c_checkpoint_output_folder)
-        c_loaded_model = framework_model_wrapper(c_checkpoint_path, pretrained_weights=pretrained_weights, backbone=backbone, n_classes=num_classes, activation=activation)
+        c_loaded_model = framework_model_wrapper(c_checkpoint_path)
         for c_angle in ang_raster_map: 
             c_rotated_raster_dst = ang_raster_map[c_angle]
-            pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, n_classes=num_classes, num_bands=num_bands)
+            pred_startegy = prediction_strategy(c_loaded_model, c_rotated_raster_dst, patch_size=patch_size, n_classes=c_loaded_model.n_classes)
             pred_startegy.fill_out_dataset()
             # saving c_angle back rotation image in current checkpoint folder
             c_back_rot_path = os.path.join(c_checkpoint_output_folder, "pred_rot_{}.tif".format(c_angle))
@@ -124,14 +124,9 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
 @click.argument('output_folder', type=click.Path(file_okay=False))
 @click.option('-ra','--rot_angles', type=click.IntRange(0, 180), multiple=True, required=True, help="Rotation angles to be applied (degrees)")
 @click.option('-cp', '--checkpoints_paths', type=click.Path(exists=True), required=True, multiple=True, help="Models checkpoints paths to load.")
-@click.option('-ps', '--patch_size', type=int, required=True, help="Patch size used at training phase")
-@click.option('-nb', '--num_bands', type=int, required=True, help="Number of bands used while training phase")
-@click.option('-nc', '--num_classes', type=int, required=True, help="Number of bands used while training phase")
-@click.option('-bb', '--backbone', type=str, required=True, help="Backbone used in sm")
-@click.option('-pw', '--pretrained_weights', type=str, required=True, help="Pretrained weights for the backbone")
+@click.option('-ps', '--patch_size', type=int, required=True, help="Patch size used for prediction phase")
 @click.option('-fn', '--framework_name', required=True, default=None,type=click.Choice(framework_options, case_sensitive=False), help="Framework used for predicition")
-@click.option('-act', '--activation', type=str, default=None, help="Activation to apply on output")
-def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, num_bands, num_classes, backbone, pretrained_weights, framework_name, activation):
+def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_size, framework_name):
     """
     """
     if (0 not in rot_angles):
@@ -155,16 +150,13 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
         checkpoints_paths = list(filter(lambda x: x.endswith(model_extension), list_of_files_in_dir ))
     
     if not(os.path.isdir(output_folder)):
-        os.makedirs(output_folder)
+        os.makedirs(output_folder)    
     
-    if backbone:
-        print("Using Backbone: {}".format(backbone))
     framework_model_wrapper = get_model_wrapper(framework_name)
-        
-    custom_config=None
+    
     with rio.open(site_raster_path) as site_rio_dst:
         run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy,
-                             custom_config, patch_size, num_bands, num_classes, framework_model_wrapper, pretrained_weights, backbone, activation)
+                             patch_size, framework_model_wrapper)
 
 
 if __name__ == "__main__":
