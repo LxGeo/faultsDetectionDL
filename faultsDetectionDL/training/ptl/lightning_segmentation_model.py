@@ -8,15 +8,14 @@ Created on Fri Dec 31 13:59:23 2021
 
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
-from faultsDetectionDL.utils.image_transformation import images_transformations_list, Trans_Identity
-from faultsDetectionDL.data.pt.faults_dataset import FaultsDataset 
+
 import torch
 import numpy as np
 import os
 import shutil
 
 
-def intersection_and_union(pred, true):
+def intersection_and_union(pred, true, n_classes):
     """
     Calculates intersection and union for a batch of images.
 
@@ -32,53 +31,34 @@ def intersection_and_union(pred, true):
     #true = true.masked_select(valid_pixel_mask).to("cpu")
     #pred = pred.masked_select(valid_pixel_mask).to("cpu")
     true= true.to("cpu")
-    pred= pred.to("cpu")
-    
-    pred = torch.argmax(pred,1)
+    pred= pred.to("cpu")    
+    pred = torch.argmax(pred,1)    
+    ##on hot encode    
+    h_true=torch.nn.functional.one_hot(true,n_classes)
+    h_pred=torch.nn.functional.one_hot(pred,n_classes)    
     # Intersection and union totals
-    intersection = np.logical_and(true, pred)
-    union = np.logical_or(true, pred)
+    intersection = np.logical_and(h_true, h_pred)
+    union = np.logical_or(h_true, h_pred)
     return intersection.sum(), union.sum()
 
-
-class FaultsDataModule(pl.LightningDataModule):
-
-    def setup(self, dataset_path, encoder_name, encoder_weights, in_channels, classes, batch_size):
-                  
-        self.train_dataset_path=os.path.join(dataset_path, 'train')
-        self.valid_dataset_path=os.path.join(dataset_path, 'valid')
-        self.batch_size=batch_size
-        self.preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder_name, encoder_weights)
-        self.train_dataset = FaultsDataset(self.train_dataset_path, images_transformations_list,
-                                           preprocessing=self.preprocessing_fn, img_bands=in_channels,
-                                           num_classes=classes)
-        self.valid_dataset = FaultsDataset(self.valid_dataset_path, [Trans_Identity()],
-                                           preprocessing=self.preprocessing_fn, img_bands=in_channels,
-                                           num_classes=classes)
-
-    def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=72)
-
-    def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.valid_dataset, batch_size=self.batch_size)
 
 
 class lightningSegModel(pl.LightningModule):
     
     def __init__(self, arch="Unet", encoder_name="resnext101_32x8d",
-                 encoder_weights="imagenet", in_channels=3, classes=1, class_weights=None, loss=torch.nn.CrossEntropyLoss,
+                 encoder_weights="imagenet", in_channels=3, classes=1, class_weights=None,
                  learning_rate=1e-5, **kwargs):
         super(lightningSegModel, self).__init__()
+        self.save_hyperparameters()
         self.arch=arch
         self.encoder_name=encoder_name
         self.encoder_weights=encoder_weights                        
         # Create model
         self.model = smp.create_model(arch=arch, encoder_name=encoder_name, encoder_weights=encoder_weights,
                                       in_channels=in_channels, classes=classes)
+        self.n_classes=classes
         self.learning_rate=learning_rate
-        print(self.learning_rate)
-        self.class_weights=torch.tensor(class_weights).float()
-        self.loss=loss(self.class_weights)
+        self.class_weights=torch.tensor(class_weights).float() if (class_weights is not None) else None
         
         # train params
         model_outputs_root_path= kwargs.get("model_outputs_root_path", "./models")
@@ -93,7 +73,7 @@ class lightningSegModel(pl.LightningModule):
                 os.makedirs(dir_path)
         
         self.gpu= kwargs.get("gpu", torch.cuda.is_available())
-        self.num_workers=kwargs.get("num_workers",1)
+        self.num_workers=kwargs.get("num_workers",72)
         self.patience= kwargs.get("patience", 4)
         self.min_epochs= kwargs.get("min_epochs", 6)
         self.max_epochs= kwargs.get("max_epochs", 50)
@@ -111,9 +91,18 @@ class lightningSegModel(pl.LightningModule):
         # Forward pass
         return self.model(image)
     
+    def combined_loss(self, logits, labels):
+        """
+        CCE and IOU
+        """
+        loss_iou = intersection_and_union(logits, labels, self.n_classes)
+        loss_cce = torch.nn.CrossEntropyLoss(self.class_weights)(logits, labels)
+        total_loss = loss_cce+loss_iou
+        return total_loss
+        
     
     def calc_loss(self, logits, labels):
-        return self.loss(logits, labels)
+        return self.combined_loss(logits, labels)
     
     def training_step(self, train_batch, batch_idx):
         x, y = train_batch
@@ -127,10 +116,16 @@ class lightningSegModel(pl.LightningModule):
         logits = self.forward(x)
         loss = self.calc_loss(logits, y)
         self.log('val_loss', loss)
+        # ref image
+        if (batch_idx%100==0):
+            try:
+                self.reference_image = torch.argmax(logits,1)[0]
+            except:
+                pass
         
-        preds = torch.softmax(logits, dim=1)#[:, 1]
-        preds = (preds > 0.5) * 1
-        intersection, union = intersection_and_union(preds, y)
+        #preds = torch.softmax(logits, dim=1)#[:, 1]
+        #preds = (preds > 0.5) * 1
+        intersection, union = intersection_and_union(logits, y, self.n_classes)
         self.intersection += intersection
         self.union += union
 
@@ -145,7 +140,14 @@ class lightningSegModel(pl.LightningModule):
         # Reset metrics before next epoch
         self.intersection = 0
         self.union = 0
-            
+        self.showActivations(self.reference_image)
+    
+    def showActivations(self,x):
+            # logging reference image    
+            try:
+                self.logger.experiment.add_image("output_",torch.Tensor.cpu(x),self.current_epoch,dataformats="HW")
+            except:
+                pass
     
     def configure_optimizers(self):
         # Define optimizer
@@ -167,6 +169,7 @@ class lightningSegModel(pl.LightningModule):
             dirpath=self.output_path,
             monitor="iou_epoch",
             mode="max",
+            save_top_k=1,
             verbose=True,
         )
         # Define early stopping behavior
