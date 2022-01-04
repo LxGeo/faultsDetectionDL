@@ -19,13 +19,15 @@ class PtlModel(GenericModel):
     Pytroch model wrapper implementation
     """
     
-    def __init__(self, model_path, **kwargs):
+    def __init__(self, model_path, device="cuda", **kwargs):
         GenericModel.__init__(self)
         self.loaded_model=lightningSegModel.load_from_checkpoint(model_path)        
         self.batch_size = self.loaded_model.batch_size
         self.n_classes = self.loaded_model.n_classes
+        self.in_channels = self.loaded_model.in_channels
         self.preprocesser = smp.encoders.get_preprocessing_fn(self.loaded_model.encoder_name, self.loaded_model.encoder_weights)
-        self.device=self.loaded_model.device
+        self.device=device
+        self.loaded_model.to(device)
     
     def predict(self, data):
         """
@@ -36,9 +38,13 @@ class PtlModel(GenericModel):
         Returns numpy array with shape (image_cnt, X_size, Y_size, band_cnt)
         """
         image_cnt, X_size, Y_size, band_cnt = data.shape
+        if band_cnt != self.in_channels:
+            data = data[:,:,:,:self.in_channels]
+            band_cnt = self.in_channels
         
         if self.preprocesser:
-            data[:,:,:,0:3] = self.preprocesser(data[:,:,:,0:3])
+            #data[:,:,:,0:3] = self.preprocesser(data[:,:,:,0:3])
+            data = self.preprocesser(data)
         
         if type(data) == np.ndarray:
             tensor_x = torch.Tensor(data).permute(0, 3, 1, 2)
