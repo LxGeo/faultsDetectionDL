@@ -30,23 +30,42 @@ def intersection_and_union(pred, true, n_classes):
     #valid_pixel_mask = true.ne(255)  # valid pixel mask
     #true = true.masked_select(valid_pixel_mask).to("cpu")
     #pred = pred.masked_select(valid_pixel_mask).to("cpu")
-    true= true.to("cpu")
-    pred= pred.to("cpu")    
+    #true= true.to("cpu")
+    #pred= pred.to("cpu")    
     pred = torch.argmax(pred,1)    
     ##on hot encode    
     h_true=torch.nn.functional.one_hot(true,n_classes)
     h_pred=torch.nn.functional.one_hot(pred,n_classes)    
     # Intersection and union totals
-    intersection = np.logical_and(h_true, h_pred)
-    union = np.logical_or(h_true, h_pred)
+    intersection = torch.logical_and(h_true, h_pred)
+    union = torch.logical_or(h_true, h_pred)
     return intersection.sum(), union.sum()
 
+def weighted_iou_loss(pred, true, class_weights):
+    
+    pred = torch.argmax(pred,1)    
+    ##on hot encode    
+    h_true=torch.nn.functional.one_hot(true,len(class_weights))
+    h_pred=torch.nn.functional.one_hot(pred,len(class_weights))  
+    
+    # Intersection and union totals
+    intersection = torch.logical_and(h_true, h_pred)    
+    union = torch.logical_or(h_true, h_pred)
+    # height and width sum()
+    intersection = intersection.sum(-2).sum(-2)
+    union = union.sum(-2).sum(-2)
+    
+    # batch_class wise loss tensor
+    b_cl_loss = ( intersection / (union + 1e-5) )
+    weighted_loss = b_cl_loss#*class_weights
+    
+    return weighted_loss.mean()
 
 
 class lightningSegModel(pl.LightningModule):
     
     def __init__(self, arch="Unet", encoder_name="resnext101_32x8d",
-                 encoder_weights="imagenet", in_channels=3, classes=1, class_weights=None,
+                 encoder_weights="imagenet", in_channels=3, classes=1, decoder_channels=[512,512,256,128,64] , class_weights=None,
                  learning_rate=1e-5, **kwargs):
         super(lightningSegModel, self).__init__()
         self.save_hyperparameters()
@@ -55,10 +74,10 @@ class lightningSegModel(pl.LightningModule):
         self.encoder_weights=encoder_weights                        
         # Create model
         self.model = smp.create_model(arch=arch, encoder_name=encoder_name, encoder_weights=encoder_weights,
-                                      in_channels=in_channels, classes=classes)
+                                      in_channels=in_channels, classes=classes, decoder_channels=decoder_channels)
         self.n_classes=classes
+        self.in_channels=in_channels
         self.learning_rate=learning_rate
-        self.class_weights=torch.tensor(class_weights).float() if (class_weights is not None) else None
         
         # train params
         model_outputs_root_path= kwargs.get("model_outputs_root_path", "./models")
@@ -83,9 +102,14 @@ class lightningSegModel(pl.LightningModule):
         self.auto_scale_batch_size=kwargs.get("auto_scale_batch_size",None)
         self.auto_lr_find=kwargs.get("auto_lr_find",None)
         
+        
+        self.class_weights=torch.tensor(class_weights).float().cuda() if (class_weights is not None) else None
         # Track validation IOU globally (reset each epoch)
         self.intersection = 0
         self.union = 0
+        self.jacc = smp.losses.JaccardLoss("multiclass")
+        self.cce = torch.nn.CrossEntropyLoss(self.class_weights)
+        self.cce_loss_weight = 0.9
         
     def forward(self, image):
         # Forward pass
@@ -94,17 +118,18 @@ class lightningSegModel(pl.LightningModule):
     def combined_loss(self, logits, labels):
         """
         CCE and IOU
-        """
-        loss_iou = intersection_and_union(logits, labels, self.n_classes)
-        loss_cce = torch.nn.CrossEntropyLoss(self.class_weights)(logits, labels)
-        total_loss = loss_cce+loss_iou
+        """        
+        #loss_iou = weighted_iou_loss(logits, labels, self.class_weights)
+        loss_cce = self.cce(logits, labels)
+        loss_iou = self.jacc(logits, labels)
+        total_loss = self.cce_loss_weight * loss_cce + (1-self.cce_loss_weight)*loss_iou
         return total_loss
-        
-    
+            
     def calc_loss(self, logits, labels):
         return self.combined_loss(logits, labels)
     
     def training_step(self, train_batch, batch_idx):
+        self.log("cce_loss_weight", self.cce_loss_weight, on_step=False, on_epoch=True)
         x, y = train_batch
         logits = self.forward(x)
         loss = self.calc_loss(logits, y)
@@ -118,10 +143,9 @@ class lightningSegModel(pl.LightningModule):
         self.log('val_loss', loss)
         # ref image
         if (batch_idx%100==0):
-            try:
-                self.reference_image = torch.argmax(logits,1)[0]
-            except:
-                pass
+            self.reference_image = torch.argmax(logits,1)[0]
+            self.showActivations(self.reference_image)
+            
         
         #preds = torch.softmax(logits, dim=1)#[:, 1]
         #preds = (preds > 0.5) * 1
@@ -140,14 +164,15 @@ class lightningSegModel(pl.LightningModule):
         # Reset metrics before next epoch
         self.intersection = 0
         self.union = 0
-        self.showActivations(self.reference_image)
+        # update cce weight every n epoch        
+        if self.current_epoch % 3 ==0:
+            self.cce_loss_weight = self.cce_loss_weight/2
+    
     
     def showActivations(self,x):
             # logging reference image    
-            try:
-                self.logger.experiment.add_image("output_",torch.Tensor.cpu(x),self.current_epoch,dataformats="HW")
-            except:
-                pass
+            self.logger.experiment.add_image("output_",torch.Tensor.cpu(x),self.current_epoch,dataformats="HW")
+            
     
     def configure_optimizers(self):
         # Define optimizer
@@ -169,7 +194,7 @@ class lightningSegModel(pl.LightningModule):
             dirpath=self.output_path,
             monitor="iou_epoch",
             mode="max",
-            save_top_k=1,
+            save_top_k=4,
             verbose=True,
         )
         # Define early stopping behavior

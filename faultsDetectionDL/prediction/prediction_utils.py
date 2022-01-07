@@ -143,7 +143,9 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
         print("Exiting multiprediction!")
         return
     
-    model_extension=".hdf5" if framework_name.lower()=="tf" else ".pth"
+    model_extension_dict ={ "tf":"hdf5", "pt": ".pth", "ptl": ".ckpt"}
+    model_extension=model_extension_dict.get(framework_name.lower(), None)
+    
     if len(checkpoints_paths)==1 and os.path.isdir(checkpoints_paths[0]):
         list_of_files_in_dir = os.listdir(checkpoints_paths[0])
         list_of_files_in_dir = [ os.path.join(checkpoints_paths[0], c_file) for c_file in list_of_files_in_dir ]
