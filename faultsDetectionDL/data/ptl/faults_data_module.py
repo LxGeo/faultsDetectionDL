@@ -24,12 +24,12 @@ class FaultsDataModule(pl.LightningDataModule):
         self.train_dataset = FaultsDataset(self.train_dataset_path, images_transformations_list,
                                            preprocessing=self.preprocessing_fn, img_bands=in_channels,
                                            num_classes=classes)
-        self.valid_dataset = FaultsDataset(self.valid_dataset_path, [Trans_Identity()],
+        self.valid_dataset = FaultsDataset(self.valid_dataset_path, images_transformations_list,
                                            preprocessing=self.preprocessing_fn, img_bands=in_channels,
-                                           num_classes=classes)
+                                           num_classes=classes, shuffle=False)
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=72)
+        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=72, shuffle=True)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.valid_dataset, batch_size=self.batch_size)
+        return torch.utils.data.DataLoader(self.valid_dataset, batch_size=self.batch_size, shuffle=True)
