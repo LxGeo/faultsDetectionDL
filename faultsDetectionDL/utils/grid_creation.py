@@ -13,7 +13,7 @@ from shapely.geometry import box
 import geopandas as gpd
 
 import math
-
+import tqdm
 from rasterio.mask import mask
 import numpy as np
 
@@ -22,7 +22,7 @@ Usage :
         python grid_creation.py RGB_file_path valid_shapefile_path output_shapefile_path tile_size 
 """    
 
-def run_grid_creation(rgb_rio_dst, train_bbox , valid_geometry, tile_size):
+def run_grid_creation(rgb_rio_dst, train_bbox , valid_geometry, tile_size, overlap_size=100):
     """
     Inputs:
         RGB rasterio dataset
@@ -45,40 +45,47 @@ def run_grid_creation(rgb_rio_dst, train_bbox , valid_geometry, tile_size):
     # Define the grid blocks
     Nx_blocks = math.ceil(IMG_WIDTH/tile_size)
     Ny_blocks = math.ceil(IMG_HEIGHT/tile_size)
-
+    
+    #overlap count
+    overlap_count = math.floor(tile_size/overlap_size)
+    
     grid_list=[]
     label_list=[]
     
-    for ix in range(Nx_blocks):
+    for ix in tqdm.tqdm(range(Nx_blocks), desc="grid creation!"):
         for iy in range(Ny_blocks):
-            win = Window(ix*tile_size, iy*tile_size, tile_size, tile_size)
-            
-            c_box = box(*rasterio.windows.bounds(win,rgb_rio_dst.transform))
-            
-            # out of extents
-            if (not c_box.intersects(all_zone_geometry)):
-                 grid_list.append(c_box)
-                 label_list.append(-1)
-                 continue
-            
-            if (c_box.intersects(valid_geometry)):
-                grid_list.append(c_box)
-                label_list.append(2)
-                continue
-            
-            #out_array, _ = mask(rgb_rio_dst, [c_box],crop=True)
-            out_array = rgb_rio_dst.read(window=win)[0:-1]
-            
-            out_array_summed=np.sum(out_array, axis=0)
-            any_val=out_array_summed.flat[0]
-            #if (np.all(out_array_summed==any_val)):
-            if (len(np.unique(out_array_summed))>2):
-                grid_list.append(c_box)
-                label_list.append(0)
-                continue
-            
-            grid_list.append(c_box)
-            label_list.append(-1)
+            for ov_x in range(overlap_count):
+                c_overlap_x = overlap_size * ov_x
+                for ov_y in range(overlap_count):                    
+                    c_overlap_y = overlap_size * ov_y
+                    win = Window(ix*tile_size+c_overlap_x, iy*tile_size+c_overlap_y, tile_size, tile_size)
+                    
+                    c_box = box(*rasterio.windows.bounds(win,rgb_rio_dst.transform))
+                    
+                    # out of extents
+                    if (not c_box.intersects(all_zone_geometry)):
+                         grid_list.append(c_box)
+                         label_list.append(-1)
+                         continue
+                    
+                    if (c_box.intersects(valid_geometry)):
+                        grid_list.append(c_box)
+                        label_list.append(2)
+                        continue
+                    
+                    #out_array, _ = mask(rgb_rio_dst, [c_box],crop=True)
+                    out_array = rgb_rio_dst.read(window=win)[0:-1]
+                    
+                    out_array_summed=np.sum(out_array, axis=0)
+                    any_val=out_array_summed.flat[0]
+                    #if (np.all(out_array_summed==any_val)):
+                    if (len(np.unique(out_array_summed))>2):
+                        grid_list.append(c_box)
+                        label_list.append(0)
+                        continue
+                    
+                    grid_list.append(c_box)
+                    label_list.append(-1)
             
     out_gdf=gpd.GeoDataFrame({"geometry":grid_list, "TTV": label_list})
     out_gdf.crs=rgb_rio_dst.crs
