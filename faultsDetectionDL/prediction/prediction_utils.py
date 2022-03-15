@@ -18,7 +18,7 @@ from skimage.transform import rotate as rotate_image
 from shapely.geometry import box
 from faultsDetectionDL.utils.large_rasters_utils import rotate_large_raster
 
-from faultsDetectionDL.prediction.prediction_strategies import PatchOverlapStrategy
+from faultsDetectionDL.prediction.prediction_strategies import PatchOverlapStrategy, Basic2Strategy
 import tempfile
 import affine
 from faultsDetectionDL.prediction.model_loader import GenericModel,get_model_wrapper
@@ -89,7 +89,8 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
                                count=rotated_array.shape[2],
                                dtype=rotated_array.dtype,
                                crs=site_crs,
-                               transform=new_geotransform)
+                               transform=new_geotransform,
+                               nodata=site_rio_dst.nodata)
             c_rotated_raster_dst.write(reshape_as_raster(rotated_array).astype(c_rotated_raster_dst.meta["dtype"]))
             c_rotated_raster_dst.close()
             c_rotated_raster_dst = rio.open(c_rotated_raster_tmpfile.name, "r")
@@ -157,7 +158,7 @@ def main(site_raster_path, output_folder, rot_angles, checkpoints_paths, patch_s
     framework_model_wrapper = get_model_wrapper(framework_name)
     
     with rio.open(site_raster_path) as site_rio_dst:
-        run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, PatchOverlapStrategy,
+        run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, Basic2Strategy,
                              patch_size, framework_model_wrapper)
 
 
