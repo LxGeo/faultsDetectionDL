@@ -12,7 +12,7 @@ from skimage.io import imread
 import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import ToTensor
-
+import random
 
 def get_filtered_files(folder_to_search, include_extension=(".tif",) ):
     """
@@ -25,7 +25,7 @@ def get_filtered_files(folder_to_search, include_extension=(".tif",) ):
 
 class FaultsDataset(Dataset):
     
-    def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3, num_classes=1 ,image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",)):
+    def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3, num_classes=1 ,image_sub_dir="image", label_sub_dir="gt", include_extension=(".tif",), shuffle=True):
         
         self.img_dir = data_dir
         assert os.path.isdir(data_dir), "Can't find path {}".format(data_dir)
@@ -34,6 +34,11 @@ class FaultsDataset(Dataset):
         
         self.images_paths = get_filtered_files(self.image_dir, include_extension=include_extension)
         self.labels_paths = get_filtered_files(self.label_dir, include_extension=include_extension)
+        
+        if shuffle:
+            c = list(zip(self.images_paths, self.labels_paths))
+            random.shuffle(c)        
+            self.images_paths, self.labels_paths = zip(*c)
         
         self.non_augmented_images_count = len(self.images_paths)
         assert self.non_augmented_images_count == len(self.labels_paths)
@@ -66,7 +71,7 @@ class FaultsDataset(Dataset):
         
         if self.preprocessing:
             #img[:,:,0:3] = self.preprocessing(img[:,:,0:3])
-            img = self.preprocessing(img)
+            img = self.preprocessing(img)[:,:,0:self.img_bands]
         
         if self.num_classes==1:
             label = np.expand_dims(label, axis=-1)
