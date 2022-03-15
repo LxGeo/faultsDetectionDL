@@ -9,13 +9,13 @@ Created on Fri Dec 31 13:59:23 2021
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 
+from matplotlib import pyplot as plt
 import torch
 import numpy as np
 import os
-import shutil
 
 
-def intersection_and_union(pred, true, n_classes):
+def intersection_and_union(pred, true, n_classes, threshold=0.5):
     """
     Calculates intersection and union for a batch of images.
 
@@ -31,15 +31,21 @@ def intersection_and_union(pred, true, n_classes):
     #true = true.masked_select(valid_pixel_mask).to("cpu")
     #pred = pred.masked_select(valid_pixel_mask).to("cpu")
     #true= true.to("cpu")
-    #pred= pred.to("cpu")    
-    pred = torch.argmax(pred,1)    
-    ##on hot encode    
-    h_true=torch.nn.functional.one_hot(true,n_classes)
-    h_pred=torch.nn.functional.one_hot(pred,n_classes)    
-    # Intersection and union totals
-    intersection = torch.logical_and(h_true, h_pred)
-    union = torch.logical_or(h_true, h_pred)
-    return intersection.sum(), union.sum()
+    #pred= pred.to("cpu")
+    if n_classes !=1:
+        pred = torch.argmax(pred,1)    
+        ##on hot encode    
+        h_true=torch.nn.functional.one_hot(true,n_classes)
+        h_pred=torch.nn.functional.one_hot(pred,n_classes)    
+        # Intersection and union totals
+        intersection = torch.logical_and(h_true, h_pred)
+        union = torch.logical_or(h_true, h_pred)
+        return intersection.sum(), union.sum()
+    else:
+        pred = (pred > threshold).long()
+        intersection = torch.logical_and(true[:,1:,:,:], pred[:,1:,:,:])
+        union = torch.logical_or(true[:,1:,:,:], pred[:,1:,:,:])
+        return intersection.sum(), union.sum()
 
 def weighted_iou_loss(pred, true, class_weights):
     
@@ -103,13 +109,16 @@ class lightningSegModel(pl.LightningModule):
         self.auto_lr_find=kwargs.get("auto_lr_find",None)
         
         
-        self.class_weights=torch.tensor(class_weights).float().cuda() if (class_weights is not None) else None
+        self.class_weights=torch.tensor(class_weights).float().to(self.device) if (class_weights is not None) else None
         # Track validation IOU globally (reset each epoch)
         self.intersection = 0
         self.union = 0
-        self.jacc = smp.losses.JaccardLoss("multiclass")
-        self.cce = torch.nn.CrossEntropyLoss(self.class_weights)
-        self.cce_loss_weight = 0.9
+        self.jacc = smp.losses.JaccardLoss("binary" if classes==1 else "multiclass" )
+        self.cce = smp.utils.losses.BCEWithLogitsLoss(self.class_weights) if classes==1 else torch.nn.CrossEntropyLoss(self.class_weights) 
+        self.jacc_loss_weight = 0.9
+        self.cce_loss_weight = 0.1
+        self.softmax = torch.nn.Softmax(1)
+        
         
     def forward(self, image):
         # Forward pass
@@ -121,34 +130,30 @@ class lightningSegModel(pl.LightningModule):
         """        
         #loss_iou = weighted_iou_loss(logits, labels, self.class_weights)
         loss_cce = self.cce(logits, labels)
-        loss_iou = self.jacc(logits, labels)
-        total_loss = self.cce_loss_weight * loss_cce + (1-self.cce_loss_weight)*loss_iou
-        return total_loss
+        loss_iou = self.jacc(logits, labels)        
+        total_loss = self.cce_loss_weight * loss_cce + self.jacc_loss_weight*loss_iou
+        return total_loss, loss_cce, loss_iou
             
     def calc_loss(self, logits, labels):
         return self.combined_loss(logits, labels)
     
     def training_step(self, train_batch, batch_idx):
-        self.log("cce_loss_weight", self.cce_loss_weight, on_step=False, on_epoch=True)
         x, y = train_batch
         logits = self.forward(x)
-        loss = self.calc_loss(logits, y)
-        self.log('train_loss', loss)
-        return loss
+        tot_loss, loss_cce, loss_iou = self.calc_loss(logits, y)
+        self.log('train_loss_cce', loss_cce, on_step=False, on_epoch=True)
+        self.log('train_loss_iou', loss_iou, on_step=False, on_epoch=True)
+        self.log('train_loss', tot_loss, on_step=True, on_epoch=True)
+        return tot_loss
     
     def validation_step(self, val_batch, batch_idx):
         x, y = val_batch
         logits = self.forward(x)
-        loss = self.calc_loss(logits, y)
-        self.log('val_loss', loss)
-        # ref image
-        if (batch_idx%100==0):
-            self.reference_image = torch.argmax(logits,1)[0]
-            self.showActivations(self.reference_image)
-            
+        tot_loss, loss_cce, loss_iou = self.calc_loss(logits, y)
+        self.log('val_loss_cce', loss_cce, on_step=False, on_epoch=True)
+        self.log('val_loss_iou', loss_iou, on_step=False, on_epoch=True)
+        self.log('val_loss', tot_loss, prog_bar=True)
         
-        #preds = torch.softmax(logits, dim=1)#[:, 1]
-        #preds = (preds > 0.5) * 1
         intersection, union = intersection_and_union(logits, y, self.n_classes)
         self.intersection += intersection
         self.union += union
@@ -158,26 +163,43 @@ class lightningSegModel(pl.LightningModule):
         self.log(
             "iou", batch_iou, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
-        return batch_iou
+        return tot_loss
+    
+    
+    def image_grid(self, x, y, preds):  
+                
+        classes = torch.argmax(preds,1)
+        bs = self.batch_size
+                
+        for i in range(bs):
+            fixed_rgb = (x[i]-x[i].min())/(x[i].max()-x[i].min())
+            self.logger.experiment.add_image("rgb_{}".format(i),fixed_rgb,self.current_epoch)
+            fixed_gt = torch.unsqueeze(y[i],0) / self.n_classes
+            self.logger.experiment.add_image("gt_{}".format(i),fixed_gt,self.current_epoch)
+            fixed_preds = (preds[i]-preds[i].min())/(preds[i].max()-preds[i].min())
+            self.logger.experiment.add_image("preds_{}".format(i),fixed_preds,self.current_epoch)
+            fixed_preds_class = torch.unsqueeze(classes[i],0)/self.n_classes
+            self.logger.experiment.add_image("preds_class_{}".format(i),fixed_preds_class,self.current_epoch)
+        
+        
     
     def validation_epoch_end(self, outputs):
         # Reset metrics before next epoch
         self.intersection = 0
         self.union = 0
-        # update cce weight every n epoch        
-        if self.current_epoch % 3 ==0:
-            self.cce_loss_weight = self.cce_loss_weight/2
-    
-    
-    def showActivations(self,x):
-            # logging reference image    
-            self.logger.experiment.add_image("output_",torch.Tensor.cpu(x),self.current_epoch,dataformats="HW")
-            
+        
+        if hasattr(self, "sample_val"):
+            X,Y = self.sample_val
+            logits = self.forward(X.to(self.device))            
+            self.image_grid(X, Y, logits)
+        
+        
+                   
     
     def configure_optimizers(self):
         # Define optimizer
         optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.learning_rate
+            self.model.parameters(), lr=self.learning_rate, weight_decay=1e-3
         )
         # Define scheduler
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -199,9 +221,9 @@ class lightningSegModel(pl.LightningModule):
         )
         # Define early stopping behavior
         early_stop_callback = pl.callbacks.early_stopping.EarlyStopping(
-            monitor="iou_epoch",
+            monitor="val_loss",
             patience=(self.patience * 3),
-            mode="max",
+            mode="min",
             verbose=True,
         )
         # Specify where TensorBoard logs will be saved
@@ -212,7 +234,8 @@ class lightningSegModel(pl.LightningModule):
             "min_epochs": self.min_epochs,
             "default_root_dir": self.output_path,
             "logger": logger,
-            "gpus": None if not self.gpu else 1,
+            #"accelerator":self.device,
+            "gpus": 1 if self.gpu else None,
             "fast_dev_run": self.fast_dev_run,
             #"num_sanity_val_steps": self.val_sanity_checks,
             "overfit_batches":self.overfit_batches,
@@ -223,10 +246,17 @@ class lightningSegModel(pl.LightningModule):
     
     def fit(self, data_module):
         # Set up and fit Trainer object
+        
+        dataloader_iterator = iter(data_module.val_dataloader())
+        self.sample_val = next(dataloader_iterator)
+        
         self.trainer = pl.Trainer(**self._get_trainer_params())
         self.trainer.fit(self, datamodule=data_module)
     
     def tune(self, data_module):
+        dataloader_iterator = iter(data_module.val_dataloader())
+        self.sample_val = next(dataloader_iterator)
+        
         self.trainer = pl.Trainer(**self._get_trainer_params())
         self.trainer.tune(self, datamodule=data_module)
 
