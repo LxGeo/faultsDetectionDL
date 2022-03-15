@@ -28,6 +28,9 @@ class PtlModel(GenericModel):
         self.preprocesser = smp.encoders.get_preprocessing_fn(self.loaded_model.encoder_name, self.loaded_model.encoder_weights)
         self.device=device
         self.loaded_model.to(device)
+        self.activation=None
+        if self.n_classes != 1:
+            self.activation = torch.nn.Softmax(1)
     
     def predict(self, data):
         """
@@ -54,17 +57,20 @@ class PtlModel(GenericModel):
             raise Exception("Unknown type for pytorch model prediction")
         
         
-        preds = np.empty(( image_cnt, 1, X_size, Y_size))
+        preds = np.empty(( image_cnt, self.n_classes, X_size, Y_size))
         with torch.no_grad():
             for c_batch_idx , (inputs, labels) in enumerate(tqdm(dataloder, desc="Batch prediction")):
                 inputs = inputs.to(self.device)
                 output = self.loaded_model(inputs)
                 output = output.to(torch.device('cpu'))
-                if self.n_classes > 1:
+                if self.activation:
+                    output = self.activation(output)
+                """if self.n_classes > 1:
                     output = np.expand_dims(output.numpy().argmax(axis=1), axis=1)
                 else:
                     output = output.data.numpy()
-                
+                """
+                output = output.data.numpy()
                 preds[self.batch_size*c_batch_idx: self.batch_size*(c_batch_idx+1), :, :, :] = output
             
         #preds_array = np.array(preds)
