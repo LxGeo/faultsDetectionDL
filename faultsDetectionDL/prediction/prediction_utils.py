@@ -50,8 +50,19 @@ def inv_rotate_raster( to_rotate_back_dst, reference_dst, angle, output_path ):
                 :
                 ].astype(out_dst.meta["dtype"])
             ) )
-    
 
+def preds_to_labels(in_preds_path, out_labels_path):
+    """
+    """
+    with rio.open(in_preds_path) as in_dst:
+        out_profile = in_dst.profile
+        out_profile["count"]=1
+        out_profile["dtype"]=rio.uint8
+        out_profile["nodata"]=None
+        
+        with rio.open(out_labels_path, "w", **out_profile) as out_dst:
+            out_dst.write( np.expand_dims(np.argmax(in_dst.read(),0),0) )
+    
 def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_paths, prediction_strategy,
                          patch_size, framework_model_wrapper):
     """
@@ -112,6 +123,9 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
             c_back_rot_path = os.path.join(c_checkpoint_output_folder, "pred_rot_{}.tif".format(c_angle))
             print("Applying reverse rotation!")
             inv_rotate_raster( pred_startegy.out_rio_dst, ang_raster_map[0], c_angle, c_back_rot_path )
+            
+            c_back_rot_labels_path = os.path.join(c_checkpoint_output_folder, "labels_rot_{}.tif".format(c_angle))
+            preds_to_labels(c_back_rot_path,c_back_rot_labels_path)
             pass
         
         
@@ -123,7 +137,7 @@ def run_multi_prediction(site_rio_dst, output_folder, rot_angles, checkpoints_pa
 @click.command()
 @click.argument('site_raster_path', type=click.Path(exists=True))
 @click.argument('output_folder', type=click.Path(file_okay=False))
-@click.option('-ra','--rot_angles', type=click.IntRange(0, 180), multiple=True, required=True, help="Rotation angles to be applied (degrees)")
+@click.option('-ra','--rot_angles', type=click.IntRange(0, 359), multiple=True, required=True, help="Rotation angles to be applied (degrees)")
 @click.option('-cp', '--checkpoints_paths', type=click.Path(exists=True), required=True, multiple=True, help="Models checkpoints paths to load.")
 @click.option('-ps', '--patch_size', type=int, required=True, help="Patch size used for prediction phase")
 @click.option('-fn', '--framework_name', required=True, default=None,type=click.Choice(framework_options, case_sensitive=False), help="Framework used for predicition")

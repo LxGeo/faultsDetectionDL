@@ -39,7 +39,7 @@ class InpaintDataset(Dataset):
     action_list = [[0, 1], [0, -1], [1, 0], [-1, 0]]
     
     def __init__(self, data_dir, augmentation_transforms=None,preprocessing=None, img_bands=3, out_channels=3,
-                 image_sub_dir="image", include_extension=(".tif",), shuffle=True, walker_length=10000):
+                 image_sub_dir="image", include_extension=(".tif",), shuffle=True, walker_length=40000):
         
         self.img_dir = data_dir
         assert os.path.isdir(data_dir), "Can't find path {}".format(data_dir)
@@ -64,7 +64,7 @@ class InpaintDataset(Dataset):
         
 
     def __len__(self):
-        return self.augmented_count * 1000
+        return self.augmented_count * 10
     
     def generate_mask(self, img):
         H = img.shape[0]

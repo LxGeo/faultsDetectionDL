@@ -219,7 +219,8 @@ class Basic2Strategy():
         patch_num = 1
     
         while patch_num <= totpatches - 1:
-            initc = initc + stride
+            if p_c > 1 : initc = initc + stride 
+            else : initr = initr + stride
             reconim[initr:initr + patch_size, initc:patch_size + initc] += patches[patch_num]
             divim[initr:initr + patch_size, initc:patch_size + initc] += np.ones(patches[patch_num].shape)
     
@@ -263,7 +264,7 @@ class Basic2Strategy():
         """
         Windowed prediction
         """        
-        step_size = 256
+        step_size = self.patch_size//2
         patch_size=self.patch_size
         
         full_image = reshape_as_image(self.rio_dataset.read())[:,:,:3]
