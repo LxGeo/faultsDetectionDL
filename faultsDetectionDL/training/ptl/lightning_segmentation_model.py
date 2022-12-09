@@ -8,9 +8,13 @@ Created on Fri Dec 31 13:59:23 2021
 
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
+from faultsDetectionDL.training.registereis import optimizers_registery, loss_registery, schedulers_registry
+from functools import partial
+import faultsDetectionDL.training.metrics as smp_metrics
 
 from matplotlib import pyplot as plt
 import torch
+import torchvision
 import numpy as np
 import os
 
@@ -70,193 +74,170 @@ def weighted_iou_loss(pred, true, class_weights):
 
 class lightningSegModel(pl.LightningModule):
     
-    def __init__(self, arch="Unet", encoder_name="resnext101_32x8d",
-                 encoder_weights="imagenet", in_channels=3, classes=1, decoder_channels=[512,512,256,128,64] , class_weights=None,
-                 learning_rate=1e-5, **kwargs):
+    def __init__(self, arch, encoder_name,encoder_weights, in_channels=3, classes=1,
+                 decoder_channels=[512,512,256,128,64] , class_weights=None, decoder_use_batchnorm=False, decoder_attention_type=None, **kwargs):
+                
         super(lightningSegModel, self).__init__()
         self.save_hyperparameters()
-        self.arch=arch
-        self.encoder_name=encoder_name
-        self.encoder_weights=encoder_weights                        
+        
+        self.cfg = kwargs
+        self.arch=self.hparams.arch
+        self.encoder_name=self.hparams.encoder_name
+        self.encoder_weights=self.hparams.encoder_weights
+        self.decoder_channels=self.hparams.decoder_channels                     
         # Create model
+        self.decoder_use_batchnorm = self.hparams.get("decoder_use_batchnorm")
+        self.decoder_attention_type = self.hparams.get("decoder_attention_type")
+        self.seghead_dropout = self.hparams.get("dropout")
         self.model = smp.create_model(arch=arch, encoder_name=encoder_name, encoder_weights=encoder_weights,
-                                      in_channels=in_channels, classes=classes, decoder_channels=decoder_channels)
-        self.n_classes=classes
-        self.in_channels=in_channels
-        self.learning_rate=learning_rate
+                                      in_channels=in_channels, classes=classes, decoder_channels=decoder_channels,
+                                      decoder_use_batchnorm=decoder_use_batchnorm, dropout=self.seghead_dropout)#, decoder_attention_type=decoder_attention_type)
+        self.n_classes=self.hparams.classes
+        self.in_channels=self.hparams.in_channels
         
-        # train params
-        model_outputs_root_path= kwargs.get("model_outputs_root_path", "./models")
-        tensorboard_logs_root_path= kwargs.get("tensorboard_logs_root_path", "./reports/tensorboard/")
-        trial_name = "_".join([arch, encoder_name])
-        self.output_path = os.path.join(model_outputs_root_path, trial_name)
-        self.log_path = os.path.join(tensorboard_logs_root_path, trial_name)
-        for dir_path in [self.output_path, self.log_path]:
-            #if os.path.exists(dir_path):
-            #    shutil.rmtree(dir_path)
-            if not os.path.exists(dir_path):
-                os.makedirs(dir_path)
+        self.class_weights=torch.tensor(self.hparams.class_weights).float().cuda() if (self.hparams.class_weights is not None) else None
         
-        self.gpu= kwargs.get("gpu", torch.cuda.is_available())
-        self.num_workers=kwargs.get("num_workers",72)
-        self.patience= kwargs.get("patience", 4)
-        self.min_epochs= kwargs.get("min_epochs", 6)
-        self.max_epochs= kwargs.get("max_epochs", 50)
-        self.batch_size= kwargs.get("batch_size", 8)
-        self.overfit_batches=kwargs.get("overfit_batches",False)
-        self.fast_dev_run=kwargs.get("fast_dev_run", False)
-        self.auto_scale_batch_size=kwargs.get("auto_scale_batch_size",None)
-        self.auto_lr_find=kwargs.get("auto_lr_find",None)
+        if self.class_weights is not None:
+            reduction_mode, class_weights = "weighted", self.class_weights
+        else:
+            reduction_mode, class_weights = "micro", None
+        metric_args = {
+            "reduction":reduction_mode, "class_weights":class_weights, "zero_division":0
+        }
         
+        self.metrics_callable = {
+            "iou_score" : partial(smp_metrics.iou_score, **metric_args),
+            "f1_score" : partial(smp_metrics.f1_score, **metric_args),
+            "f2_score" : partial(smp_metrics.fbeta_score, beta=2, **metric_args),
+            "accuracy" : partial(smp_metrics.accuracy, **metric_args),
+            "recall" : partial(smp_metrics.recall, **metric_args),
+            "precision" : partial(smp_metrics.precision, **metric_args),
+        }
         
-        self.class_weights=torch.tensor(class_weights).float().to(self.device) if (class_weights is not None) else None
-        # Track validation IOU globally (reset each epoch)
-        self.intersection = 0
-        self.union = 0
-        self.jacc = smp.losses.JaccardLoss("binary" if classes==1 else "multiclass" )
-        self.cce = smp.utils.losses.BCEWithLogitsLoss(self.class_weights) if classes==1 else torch.nn.CrossEntropyLoss(self.class_weights) 
-        self.jacc_loss_weight = 0.9
-        self.cce_loss_weight = 0.1
-        self.softmax = torch.nn.Softmax(1)
+        self.losses_names = []
+        self.losses_weight = []
+        self.losses_callable = [ ]
+        for c_loss_obj in self.cfg["LOSSES"]:
+            c_loss_name = c_loss_obj.NAME; self.losses_names.append(c_loss_name)  
+            c_loss_weight = c_loss_obj.WEIGHT; self.losses_weight.append(c_loss_weight)  
+            c_loss_kwargs = vars(c_loss_obj.ARGS) if c_loss_obj.ARGS else {}
+                
+            c_raw_loss = loss_registery.get(c_loss_name)
+            if "ce_loss" in c_loss_name: #temporary
+                c_loss_kwargs["weight"]=self.class_weights       
+            self.losses_callable.append(
+                c_raw_loss( **c_loss_kwargs )
+            )
+        
+        self.softmax = torch.nn.Softmax(dim=1)
         
         
     def forward(self, image):
         # Forward pass
-        return self.model(image)
+        image_out = self.model(image)
+        return image_out
     
     def combined_loss(self, logits, labels):
         """
-        CCE and IOU
-        """        
-        #loss_iou = weighted_iou_loss(logits, labels, self.class_weights)
-        loss_cce = self.cce(logits, labels)
-        loss_iou = self.jacc(logits, labels)        
-        total_loss = self.cce_loss_weight * loss_cce + self.jacc_loss_weight*loss_iou
-        return total_loss, loss_cce, loss_iou
-            
+        """
+        seperate_losses = []
+        for c_l in self.losses_callable:
+            seperate_losses.append(c_l(logits, labels))
+        total_loss = sum([ c_w * c_l for c_w, c_l in zip(self.losses_weight, seperate_losses) ]) / sum(self.losses_weight)
+        return total_loss, seperate_losses
+    
     def calc_loss(self, logits, labels):
         return self.combined_loss(logits, labels)
+    
+    def calc_metrics_scores(self, logits, labels):        
+        
+        tp, fp, fn, tn = smp_metrics.get_stats(torch.softmax(logits,1), labels.long(), mode='multilabel', threshold=0.5)
+        scores = {
+            metric_key: metric_callable(tp, fp, fn, tn).item() for metric_key, metric_callable in self.metrics_callable.items()
+        }
+        return scores
     
     def training_step(self, train_batch, batch_idx):
         x, y = train_batch
         logits = self.forward(x)
-        tot_loss, loss_cce, loss_iou = self.calc_loss(logits, y)
-        self.log('train_loss_cce', loss_cce, on_step=False, on_epoch=True)
-        self.log('train_loss_iou', loss_iou, on_step=False, on_epoch=True)
-        self.log('train_loss', tot_loss, on_step=True, on_epoch=True)
+        tot_loss, seperate_losses = self.calc_loss(logits, y)
+        
+        for loss_name, loss_value in zip(self.losses_names, seperate_losses):
+            self.log(f'train_{loss_name}', loss_value, on_step=False, on_epoch=True)
+        
+        self.log('train_loss', tot_loss, on_step=True, on_epoch=True, prog_bar=True)
         return tot_loss
     
     def validation_step(self, val_batch, batch_idx):
         x, y = val_batch
         logits = self.forward(x)
-        tot_loss, loss_cce, loss_iou = self.calc_loss(logits, y)
-        self.log('val_loss_cce', loss_cce, on_step=False, on_epoch=True)
-        self.log('val_loss_iou', loss_iou, on_step=False, on_epoch=True)
-        self.log('val_loss', tot_loss, prog_bar=True)
+        tot_loss, seperate_losses = self.calc_loss(logits, y)
         
-        intersection, union = intersection_and_union(logits, y, self.n_classes)
-        self.intersection += intersection
-        self.union += union
+        for loss_name, loss_value in zip(self.losses_names, seperate_losses):
+            self.log(f'val_{loss_name}', loss_value, on_step=False, on_epoch=True)
+        
+        self.log('val_loss', tot_loss, on_step=True, on_epoch=True)
+        return self.calc_metrics_scores(logits, y[0])
 
-        # Log batch IOU
-        batch_iou = intersection / union
-        self.log(
-            "iou", batch_iou, on_step=True, on_epoch=True, prog_bar=True, logger=True
-        )
-        return tot_loss
+    def predict_step(self, batch, batch_idx=None, dataloader_idx= None):
+        return self.forward(batch[0])
     
-    
-    def image_grid(self, x, y, preds):  
-                
+    def image_grid(self, x, y, preds, prefix):  
+        
+        preds = self.softmax(preds)
         classes = torch.argmax(preds,1)
-        bs = self.batch_size
+        bs = preds.shape[0]
                 
         for i in range(bs):
             fixed_rgb = (x[i]-x[i].min())/(x[i].max()-x[i].min())
-            self.logger.experiment.add_image("rgb_{}".format(i),fixed_rgb,self.current_epoch)
-            fixed_gt = torch.unsqueeze(y[i],0) / self.n_classes
-            self.logger.experiment.add_image("gt_{}".format(i),fixed_gt,self.current_epoch)
+            self.logger.experiment.add_image(prefix+"rgb_{}".format(i),fixed_rgb,self.current_epoch)
+            fixed_gt = y[0][i]
+            self.logger.experiment.add_image(prefix+"gt_{}".format(i),fixed_gt,self.current_epoch)
             fixed_preds = (preds[i]-preds[i].min())/(preds[i].max()-preds[i].min())
-            self.logger.experiment.add_image("preds_{}".format(i),fixed_preds,self.current_epoch)
+            self.logger.experiment.add_image(prefix+"preds_{}".format(i),fixed_preds,self.current_epoch)
             fixed_preds_class = torch.unsqueeze(classes[i],0)/self.n_classes
-            self.logger.experiment.add_image("preds_class_{}".format(i),fixed_preds_class,self.current_epoch)
-        
-        
+            self.logger.experiment.add_image(prefix+"preds_class_{}".format(i),fixed_preds_class,self.current_epoch)
     
     def validation_epoch_end(self, outputs):
-        # Reset metrics before next epoch
-        self.intersection = 0
-        self.union = 0
         
         if hasattr(self, "sample_val"):
             X,Y = self.sample_val
             logits = self.forward(X.to(self.device))            
-            self.image_grid(X, Y, logits)
+            self.image_grid(X, Y, logits, "val_")
+        if hasattr(self, "sample_train"):
+            X,Y = self.sample_train
+            logits = self.forward(X.to(self.device))            
+            self.image_grid(X, Y, logits, "train_")
         
-        
-                   
-    
-    def configure_optimizers(self):
-        # Define optimizer
-        optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.learning_rate, weight_decay=1e-3
-        )
-        # Define scheduler
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max", factor=0.5, patience=self.patience
-        )
-        scheduler = {
-            "scheduler": scheduler, "interval": "epoch", "monitor": "iou_epoch",
-        }  # logged value to monitor
-        return [optimizer], [scheduler]
-    
-    def _get_trainer_params(self):
-        # Define callback behavior
-        checkpoint_callback = pl.callbacks.ModelCheckpoint(
-            dirpath=self.output_path,
-            monitor="iou_epoch",
-            mode="max",
-            save_top_k=4,
-            verbose=True,
-        )
-        # Define early stopping behavior
-        early_stop_callback = pl.callbacks.early_stopping.EarlyStopping(
-            monitor="val_loss",
-            patience=(self.patience * 3),
-            mode="min",
-            verbose=True,
-        )
-        # Specify where TensorBoard logs will be saved
-        logger = pl.loggers.TensorBoardLogger(self.log_path, name="benchmark-model")
-        trainer_params = {
-            "callbacks": [checkpoint_callback, early_stop_callback],
-            "max_epochs": self.max_epochs,
-            "min_epochs": self.min_epochs,
-            "default_root_dir": self.output_path,
-            "logger": logger,
-            #"accelerator":self.device,
-            "gpus": 1 if self.gpu else None,
-            "fast_dev_run": self.fast_dev_run,
-            #"num_sanity_val_steps": self.val_sanity_checks,
-            "overfit_batches":self.overfit_batches,
-            "auto_scale_batch_size":self.auto_scale_batch_size,
-            "auto_lr_find":self.auto_lr_find
+        combined_scores = {
+            metric_key: np.mean([x[metric_key] for x in outputs])
+            for metric_key in outputs[0]
         }
-        return trainer_params
+        for metric_key, metric_value in combined_scores.items():
+            self.log(f"val_{metric_key}", metric_value, on_epoch=True)
+        
+        return {"log_scores":combined_scores}
     
-    def fit(self, data_module):
-        # Set up and fit Trainer object
+    def get_preprocessing_fn(self):
+        return smp.encoders.get_preprocessing_fn(self.encoder_name, self.encoder_weights)
+
+    def configure_optimizers(self):
         
-        dataloader_iterator = iter(data_module.val_dataloader())
-        self.sample_val = next(dataloader_iterator)
+        optimizer = optimizers_registery.get(self.cfg["OPTIMIZER"].NAME)(
+            self.model.parameters(), **vars(self.cfg["OPTIMIZER"].PARAMS)
+        )
+
+        schedulers = []
+        if "SCHEDULER" in self.cfg and self.cfg["SCHEDULER"].USE:
+            sched = schedulers_registry.get(self.cfg["SCHEDULER"].NAME)
+            if self.cfg["SCHEDULER"].PARAMS is not None:
+                scheduler_params = vars(self.cfg["SCHEDULER"].PARAMS)
+                scheduler = sched(optimizer, **scheduler_params)
+            else:
+                scheduler = sched(optimizer)
+            
+            schedulers.append(scheduler)
         
-        self.trainer = pl.Trainer(**self._get_trainer_params())
-        self.trainer.fit(self, datamodule=data_module)
-    
-    def tune(self, data_module):
-        dataloader_iterator = iter(data_module.val_dataloader())
-        self.sample_val = next(dataloader_iterator)
-        
-        self.trainer = pl.Trainer(**self._get_trainer_params())
-        self.trainer.tune(self, datamodule=data_module)
+        return [optimizer], schedulers
+
 
