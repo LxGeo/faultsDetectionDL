@@ -74,7 +74,7 @@ def weighted_iou_loss(pred, true, class_weights):
 
 class lightningSegModel(pl.LightningModule):
     
-    def __init__(self, arch, encoder_name,encoder_weights, in_channels=3, classes=1,
+    def __init__(self, arch, encoder_name,encoder_weights, in_channels=3, classes=1, lr=1.0e-4,
                  decoder_channels=[512,512,256,128,64] , class_weights=None, decoder_use_batchnorm=False, decoder_attention_type=None, **kwargs):
                 
         super(lightningSegModel, self).__init__()
@@ -90,15 +90,18 @@ class lightningSegModel(pl.LightningModule):
         self.decoder_attention_type = self.hparams.get("decoder_attention_type")
         self.seghead_dropout = self.hparams.get("dropout")
         self.model = smp.create_model(arch=arch, encoder_name=encoder_name, encoder_weights=encoder_weights,
-                                      in_channels=in_channels, classes=classes, decoder_channels=decoder_channels,
-                                      decoder_use_batchnorm=decoder_use_batchnorm, dropout=self.seghead_dropout)#, decoder_attention_type=decoder_attention_type)
+                                      in_channels=in_channels, classes=classes, decoder_channels=self.decoder_channels,
+                                      encoder_depth=len(self.decoder_channels),
+                                      decoder_use_batchnorm=decoder_use_batchnorm)#, dropout=self.seghead_dropout)#, decoder_attention_type=decoder_attention_type)
         self.n_classes=self.hparams.classes
         self.in_channels=self.hparams.in_channels
         
+        self.lr=self.hparams.lr
+        
         self.class_weights=torch.tensor(self.hparams.class_weights).float().cuda() if (self.hparams.class_weights is not None) else None
         
-        if self.class_weights is not None:
-            reduction_mode, class_weights = "weighted", self.class_weights
+        if self.hparams.get("class_weights_metric") is not None:
+            reduction_mode, class_weights = "weighted", self.hparams.class_weights_metric
         else:
             reduction_mode, class_weights = "micro", None
         metric_args = {
@@ -223,8 +226,10 @@ class lightningSegModel(pl.LightningModule):
 
     def configure_optimizers(self):
         
+        optimizer_params = vars(self.cfg["OPTIMIZER"].PARAMS)
+        optimizer_params["lr"] = self.lr
         optimizer = optimizers_registery.get(self.cfg["OPTIMIZER"].NAME)(
-            self.model.parameters(), **vars(self.cfg["OPTIMIZER"].PARAMS)
+            self.model.parameters(), **optimizer_params
         )
 
         schedulers = []
