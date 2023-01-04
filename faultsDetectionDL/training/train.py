@@ -1,5 +1,6 @@
 
 import os
+#os.environ['USE_PYGEOS'] = '0'
 import click
 import torch
 from faultsDetectionDL.training.ptl.lightning_segmentation_model import lightningSegModel
@@ -49,7 +50,7 @@ def main(train_data_dir, val_data_dir, ckpt_dir, log_dir, custom_model_cfg, cust
     light_model = lightningSegModel(**vars(model_cfg))
     #light_model = torch.compile(light_model)
     
-    training_cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS.dirpath = ckpt_dir
+    training_cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS.filepath = ckpt_dir
     training_cfg.TENSORBOARD_LOGGER.LOG_PATH = log_dir
     
     training_params = load_cfg_trainer_params(training_cfg)
@@ -96,7 +97,7 @@ def main(train_data_dir, val_data_dir, ckpt_dir, log_dir, custom_model_cfg, cust
     if (training_params["auto_scale_batch_size"] or training_params["auto_lr_find"]):
         trainer.tune(light_model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
     else:
-        trainer.fit(light_model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
+        trainer.fit(light_model, train_dataloader=train_dataloader, val_dataloaders=valid_dataloader)
 
 if __name__ == "__main__":
     main()

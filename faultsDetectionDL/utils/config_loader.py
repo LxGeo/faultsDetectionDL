@@ -52,12 +52,13 @@ def load_cfg_trainer_params(cfg):
     """
 
     callbacks = []
+    checkpoint_callback = None
     # Checkpoint callback loading
     if cfg.MODEL_CHECKPOINT_CALLBACK.USE:
         if cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS is not None:
-            os.makedirs(cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS.dirpath, exist_ok=True)
+            os.makedirs(cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS.filepath, exist_ok=True)
             save_params = vars(cfg.MODEL_CHECKPOINT_CALLBACK.PARAMS)
-            callbacks.append(
+            checkpoint_callback = (
                 ModelCheckpoint(**save_params)
             )
         else:
@@ -83,6 +84,7 @@ def load_cfg_trainer_params(cfg):
 
     lightning_params.update(
         {
+            "checkpoint_callback": checkpoint_callback,
             "callbacks":callbacks,
             "logger":logger
         }
