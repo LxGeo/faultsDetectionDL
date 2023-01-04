@@ -95,16 +95,16 @@ class PixelWiseWeightedDiceLoss(nn.Module):
         
         labels, weights = labels_bundle
         
-        weights = weights.permute(0,2,3,1)
+        #weights = weights.permute(0,2,3,1)
         logits = self.logits_activation(logits)
-        labels = self.logits_activation(labels)
+        labels = self.labels_activation(labels)
         
-        one_hot_logits = F.one_hot(logits, num_classes)
-        one_hot_labels = F.one_hot(labels, num_classes)
+        #logits = F.one_hot(logits, num_classes)
+        #one_hot_labels = F.one_hot(labels, num_classes)
         
-        tp = (one_hot_logits * one_hot_labels * weights).sum(dim=[0,1,2])
-        fp = (one_hot_logits * (1-one_hot_labels) * weights).sum(dim=[0,1,2])
-        fn = ((1-one_hot_logits) * one_hot_labels * weights).sum(dim=[0,1,2])
+        tp = (logits * labels * weights).sum(dim=[0,2,3])
+        fp = (logits * (1-labels) * weights).sum(dim=[0,2,3])
+        fn = ((1-logits) * labels * weights).sum(dim=[0,2,3])
         
         class_losses = 1 - 2 * tp / (2*tp+fp+fn+self.eps)
         return class_losses.mean()
